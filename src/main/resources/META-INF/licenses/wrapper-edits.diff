@@ -1,0 +1,840 @@
+--- official/src/main/java/com/elfmcys/ysm/natives/Blake3.java
++++ wrapper-src/com/elfmcys/ysm/natives/Blake3.java
+@@ -1,47 +1,9 @@
++// Modified copy of a Yes Steve Model source file (Apache-2.0), upstream commit 74c53b58b2f9.
++// Change: reduced to the class header and its native method declarations (annotations dropped).
+ package com.elfmcys.ysm.natives;
+ 
+-import com.elfmcys.ysm.buffer.UniBuffer;
+-import com.elfmcys.ysm.natives.buffer.BufferArgument;
+-
+-import java.lang.ref.Reference;
+-
+ public class Blake3 {
+-    public static final int HASH_SIZE = 32;
+-
+-    private static final int OP_COMPARE = 1;
+-    private static final int OP_COMPUTE = 2;
+-
+-    public static boolean validateHash(UniBuffer source, byte[] hash) {
+-        var args = BufferArgument.packInput(source);
+-        final int result;
+-        try {
+-            result = nBlake3(args.obj(), args.flags(), hash, OP_COMPARE);
+-        } finally {
+-            Reference.reachabilityFence(source);
+-        }
+-        if (result == -1) {
+-            throw new IllegalArgumentException();
+-        }
+-        return result != 0;
+-    }
+-
+-    public static byte[] computeHash(UniBuffer source) {
+-        var hash = new byte[HASH_SIZE];
+-        computeHash(source, hash);
+-        return hash;
+-    }
+-
+-    public static void computeHash(UniBuffer source, byte[] hash) {
+-        var args = BufferArgument.packInput(source);
+-        final boolean result;
+-        try {
+-            result = nBlake3(args.obj(), args.flags(), hash, OP_COMPUTE) == -1;
+-        } finally {
+-            Reference.reachabilityFence(source);
+-        }
+-        if (result) {
+-            throw new IllegalArgumentException();
+-        }
++    private Blake3() {
+     }
+ 
+     private static native int nBlake3(Object source, long sourceFlags, byte[] hash, int op);
+--- official/src/main/java/com/elfmcys/ysm/natives/NativeArchive.java
++++ wrapper-src/com/elfmcys/ysm/natives/NativeArchive.java
+@@ -1,117 +1,16 @@
++// Modified copy of a Yes Steve Model source file (Apache-2.0), upstream commit 74c53b58b2f9.
++// Change: reduced to the class header and its native method declarations (annotations dropped).
+ package com.elfmcys.ysm.natives;
+ 
+-import com.elfmcys.ysm.buffer.NativeBuffer;
+-import com.elfmcys.ysm.buffer.annotation.Borrowed;
+-import com.elfmcys.ysm.format.vfs.VirtualFileSystem;
+-import com.elfmcys.ysm.util.CleanerUtil;
+-import com.elfmcys.ysm.util.Closeable;
+-import org.jetbrains.annotations.Nullable;
+-
+-import java.lang.ref.Cleaner;
+-import java.lang.ref.Reference;
+-import java.nio.ByteBuffer;
+-import java.util.concurrent.atomic.AtomicBoolean;
+-
+-// 目前支持 zip、7z、旧版 ysm
+-public class NativeArchive implements VirtualFileSystem, Closeable {
+-    private final long ptr;
+-    private final State state;
+-    private final Cleaner.Cleanable cleanable;
+-
+-    public NativeArchive(String path) {
+-        ptr = nCreate(path);
+-        if (ptr == 0) {
+-            throw new IllegalArgumentException("Could not open archive: " + path);
+-        }
+-        state = new State(ptr);
+-        cleanable = CleanerUtil.ref(this, state, State::clean);
+-    }
+-
+-    private void checkClosed() {
+-        if (!state.open.get()) {
+-            throw new IllegalStateException("Already Closed");
+-        }
+-    }
+-
+-    @Override
+-    public String[] listFiles(@Nullable String path) {
+-        checkClosed();
+-        final String[] result;
+-        try {
+-            result = nList(ptr, path, 0);
+-        } finally {
+-            Reference.reachabilityFence(this);
+-        }
+-        if (result == null) {
+-            throw new IllegalStateException("Failed to list files");
+-        }
+-        return result;
+-    }
+-
+-    @Override
+-    public String[] listDirectories(@Nullable String path) {
+-        checkClosed();
+-        final String[] result;
+-        try {
+-            result = nList(ptr, path, 1);
+-        } finally {
+-            Reference.reachabilityFence(this);
+-        }
+-        if (result == null) {
+-            throw new IllegalStateException("Failed to list directories");
+-        }
+-        return result;
+-    }
+-
+-    @Override
+-    public boolean hasFile(String fileName) {
+-        checkClosed();
+-        // 随便返回个东西
+-        try {
+-            return nGetFile(ptr, fileName, true) != null;
+-        } finally {
+-            Reference.reachabilityFence(this);
+-        }
+-    }
+-
+-    @Borrowed
+-    @Override
+-    public @Nullable NativeBuffer getFile(String fileName) {
+-        checkClosed();
+-        final Object buf;
+-        try {
+-            buf = nGetFile(ptr, fileName, false);
+-        } finally {
+-            Reference.reachabilityFence(this);
+-        }
+-        if (buf == null) {
+-            return null;
+-        }
+-        return NativeBuffer.borrow((ByteBuffer) buf);
+-    }
+-
+-    @Override
+-    public void close() {
+-        cleanable.clean();
++public class NativeArchive {
++    private NativeArchive() {
+     }
+ 
+-    private static final class State {
+-        private final long ptr;
+-        private final AtomicBoolean open = new AtomicBoolean(true);
++    private static native long nCreate(String path);
+ 
+-        private State(long ptr) {
+-            this.ptr = ptr;
+-        }
++    private static native void nDestroy(long ptr);
+ 
+-        private void clean() {
+-            if (open.compareAndSet(true, false)) {
+-                nDestroy(ptr);
+-            }
+-        }
+-    }
++    private static native String[] nList(long ptr, String path, int type);
+ 
+-    private static native long nCreate(String path);
+-    private static native void nDestroy(long ptr);
+-    private static native String[] nList(long ptr, @Nullable String path, int type);
+     private static native Object nGetFile(long ptr, String fileName, boolean dryRun);
+ }
+--- official/src/main/java/com/elfmcys/ysm/natives/NativeProfiler.java
++++ wrapper-src/com/elfmcys/ysm/natives/NativeProfiler.java
+@@ -1,86 +1,11 @@
++// Modified copy of a Yes Steve Model source file (Apache-2.0), upstream commit 74c53b58b2f9.
++// Change: reduced to the class header and its native method declarations (annotations dropped).
+ package com.elfmcys.ysm.natives;
+ 
+-import java.io.Closeable;
+-
+ public final class NativeProfiler {
+     private NativeProfiler() {
+     }
+ 
+-    public static Scope beginAnimatableUpdate() {
+-        return NativeRuntime.isTracyEnabled()
+-                ? beginZone(JavaZone.ANIMATABLE_UPDATE)
+-                : Scope.NOOP;
+-    }
+-
+-    public static Scope beginRenderer() {
+-        return NativeRuntime.isTracyEnabled()
+-                ? beginZone(JavaZone.RENDERER)
+-                : Scope.NOOP;
+-    }
+-
+-    public static Scope beginFallbackVertexWrite() {
+-        return NativeRuntime.isTracyEnabled()
+-                ? beginZone(JavaZone.FALLBACK_VERTEX_WRITER)
+-                : Scope.NOOP;
+-    }
+-
+-    public static boolean beginFrame() {
+-        return NativeRuntime.isTracyEnabled() && nBeginFrame() != 0;
+-    }
+-
+-    public static void endFrame(boolean active) {
+-        if (active) {
+-            nEndFrame();
+-        }
+-    }
+-
+-    private static Scope beginZone(JavaZone zone) {
+-        var token = nBeginZone(zone.sourceLocation);
+-        return token == 0 ? Scope.NOOP : new Scope(token);
+-    }
+-
+-    private enum JavaZone {
+-        ANIMATABLE_UPDATE(
+-                "YSM/Java/AnimatableEntity.update",
+-                "AnimatableEntity.update",
+-                "AnimatableEntity.java"),
+-        RENDERER(
+-                "YSM/Java/NativeRenderer.render",
+-                "NativeRenderer.render",
+-                "NativeRenderer.java"),
+-        FALLBACK_VERTEX_WRITER(
+-                "YSM/Java/FallbackVertexWriter.write",
+-                "FallbackVertexWriter.write",
+-                "FallbackVertexWriter.java");
+-
+-        private final long sourceLocation;
+-
+-        JavaZone(String name, String function, String file) {
+-            sourceLocation = nCreateSourceLocation(name, function, file, 0);
+-            if (sourceLocation == 0) {
+-                throw new IllegalStateException(
+-                        "Failed to create native profile source location: " + name);
+-            }
+-        }
+-    }
+-
+-    public static final class Scope implements Closeable {
+-        private static final Scope NOOP = new Scope(0);
+-
+-        private final long token;
+-
+-        private Scope(long token) {
+-            this.token = token;
+-        }
+-
+-        @Override
+-        public void close() {
+-            if (token != 0) {
+-                nEndZone(token);
+-            }
+-        }
+-    }
+-
+     private static native long nCreateSourceLocation(String name, String function, String file, int line);
+ 
+     private static native long nBeginZone(long sourceLocation);
+--- official/src/main/java/com/elfmcys/ysm/natives/Zstd.java
++++ wrapper-src/com/elfmcys/ysm/natives/Zstd.java
+@@ -1,49 +1,10 @@
++// Modified copy of a Yes Steve Model source file (Apache-2.0), upstream commit 74c53b58b2f9.
++// Change: reduced to the class header and its native method declarations (annotations dropped).
+ package com.elfmcys.ysm.natives;
+ 
+-import com.elfmcys.ysm.buffer.BufferType;
+-import com.elfmcys.ysm.buffer.UniBuffer;
+-import com.elfmcys.ysm.buffer.annotation.Owned;
+-import com.elfmcys.ysm.natives.buffer.BufferArgument;
+-import org.jetbrains.annotations.Nullable;
+-
+-import java.lang.ref.Reference;
+-
+ public final class Zstd {
+-    private static final int OP_COMPRESS = 1;
+-    private static final int OP_DECOMPRESS = 2;
+-
+     private Zstd() {
+     }
+ 
+-    @Owned
+-    public static UniBuffer compressAndHash(UniBuffer source, byte @Nullable [] hash, BufferType outputType, int level) {
+-        var args = BufferArgument.packInput(source);
+-        final Object result;
+-        try {
+-            result = nZstd(args.obj(), args.flags(), hash, level, outputType.id(), OP_COMPRESS);
+-        } finally {
+-            Reference.reachabilityFence(source);
+-        }
+-        if (result == null) {
+-            throw new IllegalStateException("Native zstd compression returned no result");
+-        }
+-        return BufferArgument.unpackOutput(result);
+-    }
+-
+-    @Owned
+-    public static UniBuffer decompressAndValidate(UniBuffer source, int outputSize, byte @Nullable [] hash, BufferType outputType) {
+-        var args = BufferArgument.packInput(source);
+-        final Object result;
+-        try {
+-            result = nZstd(args.obj(), args.flags(), hash, outputSize, outputType.id(), OP_DECOMPRESS);
+-        } finally {
+-            Reference.reachabilityFence(source);
+-        }
+-        if (result == null) {
+-            throw new IllegalStateException("Native zstd decompression returned no result");
+-        }
+-        return BufferArgument.unpackOutput(result);
+-    }
+-
+-    private static native Object nZstd(Object source, long sourceFlags, byte @Nullable [] hashResult, int outputParam, int outputType, int op);
++    private static native Object nZstd(Object source, long sourceFlags, byte[] hashResult, int outputParam, int outputType, int op);
+ }
+--- official/src/main/java/com/elfmcys/ysm/natives/image/Image.java
++++ wrapper-src/com/elfmcys/ysm/natives/image/Image.java
+@@ -1,11 +1,10 @@
++// Modified copy of a Yes Steve Model source file (Apache-2.0), upstream commit 74c53b58b2f9.
++// Change: removed decode() (returns a Minecraft NativeImage) and its three imports.
+ package com.elfmcys.ysm.natives.image;
+ 
+ import com.elfmcys.ysm.buffer.NativeBuffer;
+ import com.elfmcys.ysm.buffer.UniBuffer;
+ import com.elfmcys.ysm.natives.buffer.BufferArgument;
+-import com.elfmcys.ysm.mixin.client.NativeImageAccessor;
+-import com.elfmcys.ysm.util.ScopeGuard;
+-import com.mojang.blaze3d.platform.NativeImage;
+ import it.unimi.dsi.fastutil.objects.ReferenceArrayList;
+ import it.unimi.dsi.fastutil.objects.ReferenceLists;
+ 
+@@ -27,28 +26,6 @@
+         return new Image(format, width, height, data.acquire());
+     }
+ 
+-    @SuppressWarnings("DataFlowIssue")
+-    public NativeImage decode() throws UnsupportedEncodingException {
+-        var args = BufferArgument.packInput(data);
+-        try (var dstScope = ScopeGuard.create(new NativeImage(NativeImage.Format.RGBA, width, height, false))) {
+-            var dst = dstScope.get();
+-            var dstAccessor = (NativeImageAccessor) (Object) dst;
+-            final boolean result;
+-            try {
+-                result = Native.nDecode(args.obj(), args.flags(),
+-                        format.id, width, height,
+-                        dstAccessor.ysm$pixels(), dstAccessor.ysm$size());
+-            } finally {
+-                Reference.reachabilityFence(data);
+-                Reference.reachabilityFence(dst);
+-            }
+-            if (result) {
+-                return dstScope.release();
+-            }
+-        }
+-        throw new UnsupportedEncodingException("Failed to decode image");
+-    }
+-
+     public NativeBuffer decodeToBuffer() throws UnsupportedEncodingException {
+         var args = BufferArgument.packInput(data);
+         try (var dstScope = NativeBuffer.allocateWithScope(width * height * 4)) {
+--- official/src/main/java/com/elfmcys/ysm/natives/image/ImageEncoder.java
++++ wrapper-src/com/elfmcys/ysm/natives/image/ImageEncoder.java
+@@ -1,78 +1,9 @@
++// Modified copy of a Yes Steve Model source file (Apache-2.0), upstream commit 74c53b58b2f9.
++// Change: reduced to the class header and its native method declarations (annotations dropped).
+ package com.elfmcys.ysm.natives.image;
+ 
+-import com.elfmcys.ysm.buffer.NativeBuffer;
+-import com.elfmcys.ysm.mixin.client.NativeImageAccessor;
+-import com.mojang.blaze3d.platform.NativeImage;
+-
+-import java.io.IOException;
+-import java.lang.ref.Reference;
+-
+ public class ImageEncoder {
+-    public static Image encodeLossy(NativeBuffer pixels, int width, int height, int maxWidth, int maxHeight) throws IOException {
+-        validatePixelBuffer(pixels.size(), width, height);
+-        return encode(pixels.ptr(), pixels, width, height, false, maxWidth, maxHeight);
+-    }
+-
+-    public static Image encodeLossless(NativeBuffer pixels, int width, int height) throws IOException {
+-        validatePixelBuffer(pixels.size(), width, height);
+-        return encode(pixels.ptr(), pixels, width, height, true, 0, 0);
+-    }
+-
+-    public static Image encodeLossy(NativeImage image, int maxWidth, int maxHeight) throws IOException {
+-        if (image.format() != NativeImage.Format.RGBA) {
+-            throw new UnsupportedOperationException("Image format not supported");
+-        }
+-        var accessor = (NativeImageAccessor) (Object) image;
+-        validatePixelBuffer(accessor.ysm$size(), image.getWidth(), image.getHeight());
+-        return encode(accessor.ysm$pixels(), image, image.getWidth(), image.getHeight(),
+-                false, maxWidth, maxHeight);
+-    }
+-
+-    public static Image encodeLossless(NativeImage image) throws IOException {
+-        if (image.format() != NativeImage.Format.RGBA) {
+-            throw new UnsupportedOperationException("Image format not supported");
+-        }
+-        var accessor = (NativeImageAccessor) (Object) image;
+-        validatePixelBuffer(accessor.ysm$size(), image.getWidth(), image.getHeight());
+-        return encode(accessor.ysm$pixels(), image, image.getWidth(), image.getHeight(),
+-                true, 0, 0);
+-    }
+-
+-    private static Image encode(long pixels, Object pixelsOwner, int width, int height,
+-                                boolean lossless, int maxWidth, int maxHeight) throws IOException {
+-        var capacity = Math.toIntExact(requiredPixelBytes(width, height));
+-        try (var dstScope = NativeBuffer.allocateWithScope(capacity)) {
+-            var dst = dstScope.get();
+-            final long result;
+-            try {
+-                result = nEncode(pixels, width, height, dst.ptr(), dst.size(),
+-                        lossless, maxWidth, maxHeight);
+-            } finally {
+-                Reference.reachabilityFence(pixelsOwner);
+-                Reference.reachabilityFence(dst);
+-            }
+-            if (result == 0) {
+-                throw new IOException("Failed to encode lossy image");
+-            }
+-            width  = (int) ((result >>> 48) & 0xFFFFL);
+-            height = (int) ((result >>> 32) & 0xFFFFL);
+-            var format = (int) ((result >>> 28) & 0xFL);
+-            var size   = (int) (result & 0x0FFFFFFFL);
+-            return new Image(Image.Format.VALUES.get(format), width, height, dstScope.release().slice(0, size));
+-        }
+-    }
+-
+-    private static void validatePixelBuffer(long size, int width, int height) {
+-        if (size < requiredPixelBytes(width, height)) {
+-            throw new IllegalArgumentException("Illegal pixels buffer size");
+-        }
+-    }
+-
+-    private static long requiredPixelBytes(int width, int height) {
+-        if (width < 0 || height < 0) {
+-            throw new IllegalArgumentException("Invalid image dimensions");
+-        }
+-        return Math.multiplyExact(Math.multiplyExact((long) width, height), 4L);
++    private ImageEncoder() {
+     }
+ 
+     private static native long nEncode(long pixels, int width, int height,
+--- official/src/main/java/com/elfmcys/ysm/natives/render/BonePoseView.java
++++ wrapper-src/com/elfmcys/ysm/natives/render/BonePoseView.java
+@@ -1,6 +1,7 @@
++// Modified copy of a Yes Steve Model source file (Apache-2.0), upstream commit 74c53b58b2f9.
++// Change: removed getLightmapUv(int) and the LightTexture import.
+ package com.elfmcys.ysm.natives.render;
+ 
+-import net.minecraft.client.renderer.LightTexture;
+ import org.joml.Matrix3f;
+ import org.joml.Matrix4f;
+ import org.lwjgl.system.MemoryUtil;
+@@ -75,11 +76,6 @@
+         return light == 0xFF ? -1 : light;
+     }
+ 
+-    public int getLightmapUv(int boneIndex) {
+-        var light = getLightLevel(boneIndex);
+-        return light == -1 ? -1 : LightTexture.pack(light, light);
+-    }
+-
+     private int offset(int boneIndex) {
+         if (boneIndex < 0 || boneIndex >= boneCount) {
+             throw new IndexOutOfBoundsException(
+--- official/src/main/java/com/elfmcys/ysm/natives/render/NativeBakedModel.java
++++ wrapper-src/com/elfmcys/ysm/natives/render/NativeBakedModel.java
+@@ -1,17 +1,13 @@
++// Modified copy of a Yes Steve Model source file (Apache-2.0), upstream commit 74c53b58b2f9.
++// Change: removed the bake/tryBake overloads that take a NativeImage or a QuickBuffers GeoModel, the helper boneCount(GeoModel) and six imports.
+ package com.elfmcys.ysm.natives.render;
+ 
+-import com.elfmcys.ysm.buffer.ArrayBuffer;
+ import com.elfmcys.ysm.buffer.NativeBuffer;
+ import com.elfmcys.ysm.buffer.UniBuffer;
+ import com.elfmcys.ysm.buffer.annotation.Owned;
+-import com.elfmcys.ysm.mixin.client.NativeImageAccessor;
+ import com.elfmcys.ysm.natives.NativeObject;
+ import com.elfmcys.ysm.natives.buffer.BufferArgument;
+ import com.elfmcys.ysm.natives.buffer.NativeHeapBuffer;
+-import com.elfmcys.ysm.proto.mixel.asset.model.data.GeoModel;
+-import com.elfmcys.ysm.util.ProtoUtil;
+-import com.mojang.blaze3d.platform.NativeImage;
+-import java.io.IOException;
+ import java.lang.ref.Reference;
+ import java.nio.ByteBuffer;
+ import org.joml.Vector2f;
+@@ -220,33 +216,6 @@
+     }
+ 
+     @Owned
+-    public static BakeResult bake(GeoModel model,
+-                                  NativeImage texture, int originVersion,
+-                                  boolean forceCulling, boolean forceTranslucent,
+-                                  boolean hasPbr) throws IOException {
+-        try (var modelData = ArrayBuffer.allocateWithScope(model.getSerializedSize())) {
+-            model.writeTo(ProtoUtil.sink(modelData.get()));
+-            return bake(modelData.get(), boneCount(model), texture, originVersion,
+-                    forceCulling, forceTranslucent, hasPbr);
+-        }
+-    }
+-
+-    @Owned
+-    public static BakeResult bake(UniBuffer modelData, int boneCount,
+-                                  NativeImage texture, int originVersion,
+-                                  boolean forceCulling, boolean forceTranslucent,
+-                                  boolean hasPbr) {
+-        if (texture.format() != NativeImage.Format.RGBA) {
+-            throw new IllegalArgumentException("Texture format not supported");
+-        }
+-        var accessor = (NativeImageAccessor) (Object) texture;
+-        validateTextureSize(accessor.ysm$size(), texture.getWidth(), texture.getHeight());
+-        return bake(modelData, boneCount, accessor.ysm$pixels(), texture,
+-                texture.getWidth(), texture.getHeight(), originVersion,
+-                forceCulling, forceTranslucent, hasPbr);
+-    }
+-
+-    @Owned
+     public static BakeResult bake(UniBuffer modelData, int boneCount,
+                                   NativeBuffer texturePixels, int textureWidth,
+                                   int textureHeight, int originVersion,
+@@ -311,33 +280,6 @@
+         return new ReadResult(new NativeBakedModel(ptr), sortedBoneIndices);
+     }
+ 
+-    public static boolean tryBake(UniBuffer modelData, NativeImage texture,
+-                                  int originVersion, boolean forceCulling,
+-                                  boolean forceTranslucent, boolean hasPbr) {
+-        if (texture.format() != NativeImage.Format.RGBA) {
+-            throw new IllegalArgumentException("Texture format not supported");
+-        }
+-        var accessor = (NativeImageAccessor) (Object) texture;
+-        validateTextureSize(accessor.ysm$size(), texture.getWidth(), texture.getHeight());
+-        return tryBake(modelData, accessor.ysm$pixels(), texture, texture.getWidth(),
+-                texture.getHeight(), originVersion, forceCulling,
+-                forceTranslucent, hasPbr);
+-    }
+-
+-    public static boolean tryBake(GeoModel model,
+-                                  NativeBuffer texturePixels,
+-                                  int textureWidth, int textureHeight,
+-                                  int originVersion, boolean forceCulling,
+-                                  boolean forceTranslucent, boolean hasPbr)
+-            throws IOException {
+-        try (var modelData = ArrayBuffer.allocateWithScope(model.getSerializedSize())) {
+-            model.writeTo(ProtoUtil.sink(modelData.get()));
+-            return tryBake(modelData.get(), texturePixels, textureWidth,
+-                    textureHeight, originVersion, forceCulling,
+-                    forceTranslucent, hasPbr);
+-        }
+-    }
+-
+     public static boolean tryBake(UniBuffer modelData, NativeBuffer texturePixels,
+                                   int textureWidth, int textureHeight,
+                                   int originVersion, boolean forceCulling,
+@@ -367,10 +309,6 @@
+         }
+     }
+ 
+-    private static int boneCount(GeoModel model) {
+-        return model.bones().size();
+-    }
+-
+     private static void validateBoneCount(int boneCount) {
+         if (boneCount < 0 || boneCount > 0x10000) {
+             throw new IllegalArgumentException("Invalid bone count");
+--- official/src/main/java/com/elfmcys/ysm/natives/render/NativeModelState.java
++++ wrapper-src/com/elfmcys/ysm/natives/render/NativeModelState.java
+@@ -1,8 +1,9 @@
++// Modified copy of a Yes Steve Model source file (Apache-2.0), upstream commit 74c53b58b2f9.
++// Change: replaced AnimatedGeoModel.BONE_ATTRIBUTE_COUNT by a local constant 14 and removed the import.
+ package com.elfmcys.ysm.natives.render;
+ 
+ import com.elfmcys.ysm.buffer.NativeBuffer;
+ import com.elfmcys.ysm.buffer.annotation.Borrowed;
+-import com.elfmcys.ysm.geckolib3.model.AnimatedGeoModel;
+ import com.elfmcys.ysm.natives.NativeObject;
+ import com.elfmcys.ysm.util.ExposedShortArrayList;
+ import it.unimi.dsi.fastutil.shorts.ShortList;
+@@ -17,6 +18,7 @@
+     private static final int BONE_INFO_INT_COUNT = 8;
+     private static final int CUBE_INFO_HEADER_INT_COUNT = 2;
+     private static final int CUBE_INFO_INT_COUNT = 2;
++    private static final int BONE_ATTRIBUTE_COUNT = 14;
+ 
+     private static final ByteBuffer EMPTY_NATIVE_BUFFER =
+             ByteBuffer.allocateDirect(0);
+@@ -55,7 +57,7 @@
+     // the next extract call or close.
+     public boolean extract(NativeBakedModel bakedModel,
+                                  float[] boneAttributes) {
+-        var expectedBoneCount = boneAttributes.length / AnimatedGeoModel.BONE_ATTRIBUTE_COUNT;
++        var expectedBoneCount = boneAttributes.length / BONE_ATTRIBUTE_COUNT;
+         if (locatorBoneIndices.size() < expectedBoneCount) {
+             locatorBoneIndices.size(expectedBoneCount);
+         }
+--- official/src/main/java/com/elfmcys/ysm/natives/render/NativeRenderer.java
++++ wrapper-src/com/elfmcys/ysm/natives/render/NativeRenderer.java
+@@ -1,118 +1,11 @@
++// Modified copy of a Yes Steve Model source file (Apache-2.0), upstream commit 74c53b58b2f9.
++// Change: reduced to the class header and its native method declarations (annotations dropped).
+ package com.elfmcys.ysm.natives.render;
+ 
+-import com.elfmcys.ysm.accessor.VertexBufferAccessor;
+-import com.elfmcys.ysm.buffer.NativeBuffer;
+-import com.elfmcys.ysm.buffer.annotation.Aligned;
+-import com.elfmcys.ysm.buffer.annotation.Borrowed;
+-import com.elfmcys.ysm.client.compat.IrisCompat;
+-import com.elfmcys.ysm.config.ClientConfig;
+-import com.mojang.blaze3d.systems.RenderSystem;
+-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+-import com.mojang.blaze3d.vertex.PoseStack;
+-import com.mojang.blaze3d.vertex.VertexConsumer;
+-import org.jetbrains.annotations.Nullable;
+-
+-import java.lang.ref.Reference;
+-
+ public class NativeRenderer {
+-    public static void render(VertexConsumer vertexConsumer, PoseStack.Pose pose,
+-                              NativeModelState modelState, int vertexCount,
+-                              int light, int overlay, int color, RenderContextType contextType) {
+-        var vb = probeVertexConsumer(vertexConsumer, vertexCount);
+-        var isUnknownType = vb.type == VertexFormatType.FALLBACK;
+-
+-        var matBuffer = getMatBuffer(pose);
+-        var lightAndOverlay = packLightAndOverlay(light, overlay);
+-        var flags = packFlags(vb.type, contextType);
+-
+-        Object bufferObj;
+-        int bufferFlags;
+-        if (!isUnknownType && vb.region != null) {
+-            bufferObj = vb.region.nio();
+-            bufferFlags = vb.region.size();
+-        } else {
+-            bufferObj = FallbackVertexWriter.getVertexData(vertexCount);
+-            bufferFlags = 0;
+-        }
+-
+-        final boolean result;
+-        try {
+-            result = nRender(bufferObj, bufferFlags, matBuffer.ptr(), modelState.get(),
+-                    lightAndOverlay, packColor(color), flags, IrisCompat.getEntityId());
+-        } finally {
+-            Reference.reachabilityFence(vertexConsumer);
+-            Reference.reachabilityFence(bufferObj);
+-            Reference.reachabilityFence(vb.region);
+-            Reference.reachabilityFence(matBuffer);
+-            Reference.reachabilityFence(modelState);
+-        }
+-
+-        if (result) {
+-            if (isUnknownType || vb.region == null) {
+-                FallbackVertexWriter.write(vertexConsumer, vertexCount, overlay);
+-            } else if (vb.accessor != null) {
+-                vb.accessor.ysm$advance(vertexCount);
+-            }
+-        }
+-    }
+-
+-    @SuppressWarnings("resource")
+-    private static VertexBuffer probeVertexConsumer(VertexConsumer vertexConsumer, int vertexCount) {
+-        if (vertexConsumer instanceof VertexBufferAccessor accessor && accessor.ysm$ok()) {
+-            if (!ClientConfig.USE_COMPATIBILITY_RENDERER.get()) {
+-                var format = accessor.ysm$vertexFormat();
+-                if (format == DefaultVertexFormat.NEW_ENTITY) {
+-                    return new VertexBuffer(accessor, VertexFormatType.VANILLA, accessor.ysm$reserve(vertexCount));
+-                } else {
+-                    var irisType = IrisCompat.determineVertexFormatType(format);
+-                    if (irisType.isPresent()) {
+-                        return new VertexBuffer(accessor, irisType.get(), accessor.ysm$reserve(vertexCount));
+-                    }
+-                }
+-            }
+-            accessor.ysm$reserve(vertexCount);  // 有必要吗？
+-        }
+-        return new VertexBuffer(null, VertexFormatType.FALLBACK, null);
+-    }
+-
+-    @Borrowed
+-    @Aligned(64)
+-    public static NativeBuffer getMatBuffer(PoseStack.Pose pose) {
+-        var buffer = MatBufferHolder.BUFFER;
+-        var buf = buffer.nio();
+-
+-        var view = RenderSystem.getModelViewMatrix();
+-        var proj = RenderSystem.getProjectionMatrix();
+-
+-        pose.pose().get(buf);
+-        view.get(64, buf);
+-        proj.get(128, buf);
+-        pose.normal().get(192, buf);
+-
+-        return buffer;
+-    }
+-
+-    private static long packFlags(VertexFormatType v, RenderContextType c) {
+-        return ((long) v.id() << 2) | c.id();
+-    }
+-
+-    private static long packLightAndOverlay(int lightUv, int overlayOv) {
+-        return ((long) lightUv << 32) | overlayOv;
+-    }
+-
+-    static int packColor(int argb) {
+-        return ((argb >>> 16) & 0xFF) |
+-                (argb & 0xFF00) |
+-                ((argb & 0xFF) << 16) |
+-                (argb & 0xFF000000);
++    private NativeRenderer() {
+     }
+ 
+     private static native boolean nRender(Object vertexBuffer, int vertexBufferFlag, long matPtr, long modelStatePtr,
+                                           long lightAndOverlay, int color, long flags, long irisEntityId);
+-
+-    private static final class MatBufferHolder {
+-        private static final NativeBuffer BUFFER = NativeBuffer.allocate(256, 64);
+-    }
+-
+-    private record VertexBuffer(@Nullable VertexBufferAccessor accessor, VertexFormatType type, @Nullable NativeBuffer region){}
+ }
+--- official/src/main/java/com/elfmcys/ysm/natives/sound/OpusDecoder.java
++++ wrapper-src/com/elfmcys/ysm/natives/sound/OpusDecoder.java
+@@ -1,100 +1,11 @@
++// Modified copy of a Yes Steve Model source file (Apache-2.0), upstream commit 74c53b58b2f9.
++// Change: reduced to the class header and its native method declarations (annotations dropped).
+ package com.elfmcys.ysm.natives.sound;
+ 
+-import com.elfmcys.ysm.util.CleanerUtil;
+-
+-import java.lang.ref.Cleaner;
+-import java.lang.ref.Reference;
+ import java.nio.ByteBuffer;
+-import java.util.concurrent.atomic.AtomicBoolean;
+-
+-public final class OpusDecoder implements AutoCloseable {
+-    public static final int ERROR = -1;
+-    public static final int NEED_INPUT = -2;
+-
+-    private final long ptr;
+-    private final State state;
+-    private final Cleaner.Cleanable cleanable;
+-    private boolean inputEnded;
+-
+-    public OpusDecoder(long expectedFrames) {
+-        if (expectedFrames < 0) {
+-            throw new IllegalArgumentException("expectedFrames must not be negative");
+-        }
+-        ptr = nCreate(expectedFrames);
+-        if (ptr == 0) {
+-            throw new OutOfMemoryError("Failed to allocate Opus decoder");
+-        }
+-        state = new State(ptr);
+-        cleanable = CleanerUtil.ref(this, state, State::clean);
+-    }
+-
+-    public void feed(ByteBuffer data) {
+-        checkOpen();
+-        if (inputEnded) {
+-            throw new IllegalStateException("Opus input has ended");
+-        }
+-        if (!data.isDirect()) {
+-            throw new IllegalArgumentException("input is not direct data");
+-        }
+-        try {
+-            if (!nFeed(ptr, data.slice())) {
+-                throw new IllegalArgumentException("Native Opus decoder rejected input");
+-            }
+-        } finally {
+-            Reference.reachabilityFence(this);
+-            Reference.reachabilityFence(data);
+-        }
+-    }
+-
+-    public void endInput() {
+-        checkOpen();
+-        if (!inputEnded) {
+-            try {
+-                nEndInput(ptr);
+-                inputEnded = true;
+-            } finally {
+-                Reference.reachabilityFence(this);
+-            }
+-        }
+-    }
+-
+-    public int decode(ByteBuffer destination) {
+-        checkOpen();
+-        if (!destination.isDirect()) {
+-            throw new IllegalArgumentException("output is not direct data");
+-        }
+-        try {
+-            return nDecode(ptr, destination.slice());
+-        } finally {
+-            Reference.reachabilityFence(this);
+-            Reference.reachabilityFence(destination);
+-        }
+-    }
+-
+-    @Override
+-    public void close() {
+-        cleanable.clean();
+-    }
+-
+-    private void checkOpen() {
+-        if (!state.open.get()) {
+-            throw new IllegalStateException("Decoder is closed");
+-        }
+-    }
+-
+-    private static final class State {
+-        private final long ptr;
+-        private final AtomicBoolean open = new AtomicBoolean(true);
+-
+-        private State(long ptr) {
+-            this.ptr = ptr;
+-        }
+ 
+-        private void clean() {
+-            if (open.compareAndSet(true, false)) {
+-                nDestroy(ptr);
+-            }
+-        }
++public final class OpusDecoder {
++    private OpusDecoder() {
+     }
+ 
+     private static native long nCreate(long expectedFrames);

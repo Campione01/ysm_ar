@@ -1,0 +1,14 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "ysmar.mixin",
+  "plugin": "ysmar.takeover.TakeoverMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "LivingEntityRendererMixin",
+    "PoseStackMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

@@ -1,0 +1,48 @@
+modLoader = "javafml"
+loaderVersion = "[1,)"
+license = "Apache-2.0"
+
+[[mods]]
+modId = "ysm_ar"
+version = "0.2.3"
+displayName = "YSM AR"
+credits = "Yes Steve Model project: the native library and its Java bindings (Apache-2.0), shipped here with their licence texts under META-INF/licenses; Argon4W, author of Accelerated Rendering"
+description = '''
+Loads Yes Steve Model (.ysm) player models with the open-source YSM native library and draws them through the
+compute path of Accelerated Rendering: one static mesh per bone, one bone matrix per frame.
+Next to Yes Steve Model 2.6.5 it takes over the body of the models that mod draws (players, Touhou Little Maid
+maids); Yes Steve Model keeps animating them and draws everything else.
+Client only, Windows x64. Without Accelerated Rendering 1.0.14 the mod changes nothing.
+Settings: config/ysm_ar.properties. Commands: /ysm_ar status, /ysm_ar reload.
+'''
+
+[[mixins]]
+config = "ysm_ar.mixins.json"
+
+[[dependencies.ysm_ar]]
+modId = "acceleratedrendering"
+type = "optional"
+versionRange = "[0,)"
+ordering = "AFTER"
+side = "CLIENT"
+
+[[dependencies.ysm_ar]]
+modId = "yes_steve_model"
+type = "optional"
+versionRange = "[0,)"
+ordering = "AFTER"
+side = "CLIENT"
+
+[[dependencies.ysm_ar]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1,)"
+ordering = "NONE"
+side = "CLIENT"
+
+[[dependencies.ysm_ar]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.1]"
+ordering = "NONE"
+side = "CLIENT"

@@ -1,0 +1,14 @@
+{
+  "_about": {
+    "jdk_home": "Home folder of a JDK 21 or newer; bin/javac and bin/jar are run from it.",
+    "minecraft_libraries": "The libraries folder of a Minecraft 1.21.1 installation with NeoForge 21.1.x.",
+    "version_json": "The version manifest of the NeoForge profile of that installation, which lists its libraries; a list of files when the launcher keeps the vanilla libraries in a manifest of their own.",
+    "neoforge_merged_jar": "Minecraft and NeoForge classes in one jar with Mojang names, as the ModDevGradle plugin writes it to build/moddev/artifacts of a mod project.",
+    "accelerated_rendering_jar": "The Accelerated Rendering 1.0.14 jar for Minecraft 1.21.1."
+  },
+  "jdk_home": "path/to/jdk-21",
+  "minecraft_libraries": "path/to/minecraft/libraries",
+  "version_json": "path/to/minecraft/versions/neoforge-21.1.227/neoforge-21.1.227.json",
+  "neoforge_merged_jar": "path/to/mod-project/build/moddev/artifacts/neoforge-21.1.227-merged.jar",
+  "accelerated_rendering_jar": "path/to/acceleratedrendering-1.0.14-1.21.1-alpha.jar"
+}

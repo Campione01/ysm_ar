@@ -1,0 +1,23 @@
+# Build outputs and the copies of the build inputs
+/out/
+/work/
+
+# Local build settings (see build.example.json)
+/build.local.json
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE and editor folders
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+.gradle/
+
+# Operating system files
+.DS_Store
+Thumbs.db

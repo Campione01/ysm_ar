@@ -1,0 +1,14 @@
+# Text is stored and checked out with LF line endings.
+* text=auto eol=lf
+
+# Everything under src/main is stored byte for byte: the released jar is built from exactly these files. The
+# bindings under com/elfmcys and the licence texts under META-INF/licenses keep the CRLF line endings they came with.
+/src/main/** -text
+
+# This source holds one NUL character inside a string literal; it is text all the same.
+/src/main/java/ysmar/core/Proto.java diff
+
+*.dll binary
+*.jar binary
+*.class binary
+*.png binary

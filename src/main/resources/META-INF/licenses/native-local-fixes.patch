@@ -1,0 +1,169 @@
+diff --git a/conan/cmake/targets/windows-x64.cmake b/conan/cmake/targets/windows-x64.cmake
+index 2c03e2b..39900d2 100644
+--- a/conan/cmake/targets/windows-x64.cmake
++++ b/conan/cmake/targets/windows-x64.cmake
+@@ -1,3 +1,5 @@
++# Modified copy of a YesSteveModel-Native build file (Apache-2.0), upstream commit e9ac1624.
++# Change: /bigobj added to the MSVC-only compile options (cl error C1128).
+ set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
+ set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded$<$<CONFIG:Debug>:Debug>)
+ 
+@@ -10,7 +12,7 @@ add_compile_definitions(
+ )
+ 
+ if (CMAKE_C_COMPILER_ID MATCHES "MSVC" OR CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+-    add_c_compile_options(/Zc:preprocessor)
++    add_c_compile_options(/Zc:preprocessor /bigobj)
+ endif ()
+ 
+ add_c_compile_options(
+diff --git a/modules/gfx/src/math/euler.h b/modules/gfx/src/math/euler.h
+index 5f8a26a..71286e4 100644
+--- a/modules/gfx/src/math/euler.h
++++ b/modules/gfx/src/math/euler.h
+@@ -1,3 +1,5 @@
++// Modified copy of a YesSteveModel-Native source file (Apache-2.0), upstream commit e9ac1624.
++// Change: the GNU inline-assembly barrier in SinCosApproxFmaAvx512 is compiled only by Clang and GCC (cl error C2059).
+ #pragma once
+ 
+ #include <cglm/euler.h>
+@@ -199,7 +201,9 @@ YSM_INLINE SinCos SinCosApproxFmaAvx512(__m128 input) noexcept {
+         _mm256_castsi128_si256(indices), cos_indices, 1);
+     __m256 table_low = _mm256_load_ps(kSinTable);
+     __m256 table_high = _mm256_load_ps(kSinTable + 8);
++#if defined(__clang__) || defined(__GNUC__)
+     asm volatile("" : "+x"(table_low), "+x"(table_high));
++#endif
+     const __m256 table_values = _mm256_permutex2var_ps(
+         table_low, table_indices, table_high);
+     const __m128 sin_k = _mm256_castps256_ps128(table_values);
+diff --git a/modules/gfx/src/renderer/buffer/quad_ref.h b/modules/gfx/src/renderer/buffer/quad_ref.h
+index 73e0084..8c083fd 100644
+--- a/modules/gfx/src/renderer/buffer/quad_ref.h
++++ b/modules/gfx/src/renderer/buffer/quad_ref.h
+@@ -1,3 +1,5 @@
++// Modified copy of a YesSteveModel-Native source file (Apache-2.0), upstream commit e9ac1624.
++// Change: NdcDepthSortKey is inline instead of constexpr for MSVC without constexpr <cmath> (cl error C3615).
+ #pragma once
+ 
+ #include <bit>
+@@ -9,7 +11,13 @@ namespace ysm::gfx::renderer::buffer {
+ constexpr uint32_t kInvalidDepthSortKey =
+     std::numeric_limits<uint32_t>::max();
+ 
++// MSVC 19.44 rejects a constexpr function that calls the non-constexpr
++// std::isfinite of its <cmath> (C3615); the function is only called at run time.
++#if defined(_MSC_VER) && !defined(__clang__) && !defined(__cpp_lib_constexpr_cmath)
++inline uint32_t NdcDepthSortKey(float depth) noexcept {
++#else
+ constexpr uint32_t NdcDepthSortKey(float depth) noexcept {
++#endif
+     if (!std::isfinite(depth)) [[unlikely]] {
+         return kInvalidDepthSortKey;
+     }
+diff --git a/modules/gfx/src/renderer/cube/transform_avx2.h b/modules/gfx/src/renderer/cube/transform_avx2.h
+index 4adb70a..0114523 100644
+--- a/modules/gfx/src/renderer/cube/transform_avx2.h
++++ b/modules/gfx/src/renderer/cube/transform_avx2.h
+@@ -1,3 +1,5 @@
++// Modified copy of a YesSteveModel-Native source file (Apache-2.0), upstream commit e9ac1624.
++// Change: the GNU inline-assembly barrier in StoreBackFacesAvx2 is compiled only by Clang and GCC (cl error C2059).
+ #pragma once
+ 
+ #include <immintrin.h>
+@@ -195,7 +197,9 @@ YSM_TARGET_AVX2 YSM_INLINE uint32_t StoreBackFacesAvx2(
+     _mm_storel_epi64(reinterpret_cast<__m128i*>(destination.data()), packed8);
+     auto back_face_bits =
+         static_cast<uint32_t>(_mm256_movemask_ps(back_face));
++#if defined(__clang__) || defined(__GNUC__)
+     asm volatile("" : "+r"(back_face_bits));    // 防溢出
++#endif
+     return back_face_bits;
+ }
+ 
+diff --git a/modules/java/include/java/entry.h b/modules/java/include/java/entry.h
+index be01e5a..342630d 100644
+--- a/modules/java/include/java/entry.h
++++ b/modules/java/include/java/entry.h
+@@ -1,3 +1,5 @@
++// Modified copy of a YesSteveModel-Native source file (Apache-2.0), upstream commit e9ac1624.
++// Change: EntryThunk::Invoke calls Impl through a local copy (cl 19.44 error C2102).
+ #pragma once
+ 
+ #include <cstddef>
+@@ -509,8 +511,10 @@ struct EntryThunk<Impl, Desc, Fallback,
+         std::conditional_t<kReturnDescriptor == "Z", jboolean, void>;
+ 
+     static JniReturn JNICALL Invoke(JNIEnv_* env, jclass, Args... args) {
++        // MSVC 19.44: error C2102 when Impl (a plain function) is named inside the lambda.
++        const auto impl = Impl;
+         const bool ok =
+-            InvokeStatus<Desc>([&] { return Impl(env, args...); });
++            InvokeStatus<Desc>([&] { return impl(env, args...); });
+         if constexpr (std::is_same_v<JniReturn, jboolean>) {
+             return ok ? JNI_TRUE : JNI_FALSE;
+         }
+@@ -530,7 +534,8 @@ struct EntryThunk<Impl, Desc, Fallback,
+                   "type");
+ 
+     static R JNICALL Invoke(JNIEnv_* env, jclass, Args... args) {
+-        return InvokeStatusOr<R, Desc>([&] { return Impl(env, args...); },
++        const auto impl = Impl;
++        return InvokeStatusOr<R, Desc>([&] { return impl(env, args...); },
+                                        FailureValue<R, Fallback>());
+     }
+ };
+diff --git a/modules/legacy/CMakeLists.txt b/modules/legacy/CMakeLists.txt
+index d37b573..1cbe01d 100644
+--- a/modules/legacy/CMakeLists.txt
++++ b/modules/legacy/CMakeLists.txt
+@@ -1,3 +1,5 @@
++# Modified copy of a YesSteveModel-Native build file (Apache-2.0), upstream commit e9ac1624.
++# Change: option YSM_AR_TOLERATE_INVALID_SOUND (default ON) and the compile definition it sets.
+ project(ysm-legacy CXX)
+ 
+ FILE(GLOB_RECURSE legacy_code_files CONFIGURE_DEPENDS src/*.cpp src/*.cc)
+@@ -15,6 +17,15 @@ else ()
+             YSM_ENABLE_DEBUG_LOG=0
+             ABSL_MAX_VLOG_VERBOSITY=0)
+ endif ()
++option(YSM_AR_TOLERATE_INVALID_SOUND
++        "Omit a legacy Ogg sound that fails validation instead of rejecting the model" ON)
++if (YSM_AR_TOLERATE_INVALID_SOUND)
++    target_compile_definitions(ysm-legacy PRIVATE
++            YSM_AR_TOLERATE_INVALID_SOUND=1)
++else ()
++    target_compile_definitions(ysm-legacy PRIVATE
++            YSM_AR_TOLERATE_INVALID_SOUND=0)
++endif ()
+ 
+ target_link_libraries(ysm-legacy
+         PUBLIC
+diff --git a/modules/legacy/src/v3/container/decoder.cc b/modules/legacy/src/v3/container/decoder.cc
+index ae33e72..7cd9661 100644
+--- a/modules/legacy/src/v3/container/decoder.cc
++++ b/modules/legacy/src/v3/container/decoder.cc
+@@ -1,3 +1,5 @@
++// Modified copy of a YesSteveModel-Native source file (Apache-2.0), upstream commit e9ac1624.
++// Change: with YSM_AR_TOLERATE_INVALID_SOUND, ParseSound omits an Ogg sound that fails validation instead of failing the import.
+ #include "decoder.h"
+ 
+ #include <algorithm>
+@@ -989,9 +991,17 @@ bool ParseSound(auto& context, LegacySound& value, bool& playable) {
+             playable = false;
+             return true;
+         case SoundDisposition::kCorruptSupported:
++#if YSM_AR_TOLERATE_INVALID_SOUND
++            // Same outcome as kUnknown: the sound is not emitted and the rest
++            // of the model still imports.
++            ++context.omitted_sound_count;
++            playable = false;
++            return true;
++#else
+             YSM_LEGACY_INVALID("Historical supported Ogg sound is corrupt: " +
+                                std::string(classification.diagnostic) + " (" +
+                                std::to_string(value.bytes.size()) + " bytes)");
++#endif
+     }
+     return true;
+ }
