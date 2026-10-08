@@ -1,8 +1,5 @@
 package ysmar.takeover;
 
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.loading.moddiscovery.ModFile;
 import net.neoforged.fml.loading.moddiscovery.ModFileParser;
@@ -23,7 +20,6 @@ import java.util.List;
  */
 final class ForeignMixins {
     private static final String OWN_PACKAGE = "com.elfmcys.yesstevemodel.";
-    private static final String[] CLASS_LISTS = {"mixins", "client", "server"};
 
     private static List<MixinListing.Config> configs;
 
@@ -48,8 +44,12 @@ final class ForeignMixins {
                 try {
                     mods.forEachModFile(file -> {
                         if (file instanceof ModFile modFile) {
+                            List<String> listed = new ArrayList<>();
                             for (ModFileParser.MixinConfig declared : modFile.getMixinConfigs()) {
-                                found.add(read(modFile, declared.config()));
+                                listed.add(declared.config());
+                            }
+                            for (String name : MixinListing.declared(listed, manifestAttribute(modFile))) {
+                                found.add(read(modFile, name));
                             }
                         }
                     });
@@ -98,21 +98,19 @@ final class ForeignMixins {
         }
     }
 
-    /** The package and the class lists of one mixin configuration, read from the jar of its mod. */
+    /** What the manifest of the mod file names as mixin configurations, or null. */
+    private static String manifestAttribute(ModFile file) {
+        try {
+            return file.getSecureJar().moduleDataProvider().getManifest().getMainAttributes().getValue(MixinListing.MANIFEST_ATTRIBUTE);
+        } catch (RuntimeException | LinkageError unknown) {
+            return null;
+        }
+    }
+
+    /** One mixin configuration, read from the jar of its mod. */
     private static MixinListing.Config read(ModFile file, String name) {
         try (Reader reader = Files.newBufferedReader(file.findResource(name), StandardCharsets.UTF_8)) {
-            JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
-            String mixinPackage = json.get("package").getAsString();
-            List<String> classes = new ArrayList<>();
-            for (String list : CLASS_LISTS) {
-                JsonElement entries = json.get(list);
-                if (entries != null && entries.isJsonArray()) {
-                    for (JsonElement entry : entries.getAsJsonArray()) {
-                        classes.add(mixinPackage + "." + entry.getAsString());
-                    }
-                }
-            }
-            return new MixinListing.Config(name, mixinPackage, classes);
+            return MixinListing.read(name, reader);
         } catch (Exception | LinkageError unreadable) {
             return new MixinListing.Config(name, null, null);
         }

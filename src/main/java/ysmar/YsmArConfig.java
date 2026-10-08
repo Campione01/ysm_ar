@@ -46,8 +46,12 @@ public final class YsmArConfig {
     public final boolean takeoverEnabled;
     /** Model ids that always stay with the renderer of Yes Steve Model. */
     public final Set<String> takeoverDeny;
+    /** Models that lie in a folder below custom as plain files are taken over as well, not only packed .ysm files. */
+    public final boolean takeoverFolderModels;
     /** Nanoseconds per frame for building bone meshes ahead of a model's first draw; 0: no limit. */
     public final long prewarmNanos;
+    /** Nanoseconds after which a model that no entity has shown is dropped from memory; 0: never. */
+    public final long modelIdleNanos;
     /** Test aid, pixels; not 0: our copy is drawn that far to the right and 2.6.5 keeps its own draw. */
     public final int takeoverSideBySide;
     /**
@@ -66,8 +70,20 @@ public final class YsmArConfig {
     /** Bones named ysmGlow... of a taken-over model are drawn at full light, as Yes Steve Model 2.6.5 shows them. */
     public final boolean takeoverLegacyGlow;
     /**
-     * Bone values of Yes Steve Model that are not finite numbers: false leaves a model that has one to Yes Steve
-     * Model; true hands them to Extract, which leaves such a bone and what hangs below it out.
+     * A bone whose scale differs between the axes is shaded as Yes Steve Model 2.6.5 shades it (see LegacyShade), where
+     * the game's own entity lighting draws it; false: with normals of length 1, as everywhere else.
+     */
+    public final boolean takeoverLegacyShading;
+    /**
+     * Two bones that have a face in exactly the same place are handed over as client meshes while both are drawn,
+     * whatever mesh_type says, so that the two faces come out in the order of the bones, as Yes Steve Model draws
+     * them (see BoneMesh.partners).
+     */
+    public final boolean takeoverFaceOrder;
+    /**
+     * Bone values of Yes Steve Model that are not finite numbers: true hands them to Extract, which leaves such a
+     * bone and what hangs below it out, as the draw of Yes Steve Model 2.6.5 was seen to do; false leaves a model
+     * that has one to Yes Steve Model.
      */
     public final boolean takeoverPruneNonFinite;
     /** What was wrong with the file, or null. */
@@ -110,11 +126,20 @@ public final class YsmArConfig {
             # Above 0: one log line every so many seconds with what was submitted.
             stats.interval_seconds=0
 
+            # Seconds after which a model that no entity has shown is dropped from memory. It is read again when an
+            # entity shows it; until it is there Yes Steve Model draws that entity, as at the first use of a model.
+            # 0 keeps every model until /ysm_ar reload.
+            models.idle_seconds=1800
+
             # Take-over of the models Yes Steve Model 2.6.5 draws (players, Touhou Little Maid maids): their bodies go
             # through Accelerated Rendering, everything else stays with Yes Steve Model. false leaves every model to it.
             takeover.enabled=true
             # Model ids (as /ysm model set takes them) that always stay with Yes Steve Model, separated by ;
             takeover.deny=
+            # true: a model that lies in a folder below config/yes_steve_model/custom as plain files (ysm.json, or
+            # the old layout with main.json) is taken over like a packed .ysm file. false leaves such models to Yes
+            # Steve Model. Its built-in models stay with it either way.
+            takeover.folder_models=true
             # Models whose animations use the Molang function bone_pivot_abs: exclude leaves them to Yes Steve
             # Model (its own draw computes the values of that function); provide takes them over as well and
             # writes those values into Yes Steve Model's array from the poses this mod computes.
@@ -131,14 +156,26 @@ public final class YsmArConfig {
             # true: bones whose name starts with ysmGlow (eye highlights and the like) are drawn at full light whatever
             # the light around the entity, as Yes Steve Model 2.6.5 shows them; false: at the light of the entity.
             takeover.legacy_glow=true
+            # true: a bone that an animation scales by different factors along its axes is shaded as Yes Steve Model
+            # 2.6.5 shades it without a shader pack (stretched parts get brighter or darker); such a bone is then
+            # drawn in more pieces. false: shaded like every other bone. With a shader pack this changes nothing.
+            takeover.legacy_shading=true
+            # true: where two bones have a face in exactly the same place (same corners, same side), the face of the
+            # later bone shows, as in Yes Steve Model. While both bones are drawn they are handed over as client
+            # meshes, whatever mesh_type says, because only those keep the order of the bones. false: mesh_type
+            # alone decides, and which of the two faces shows is left to Accelerated Rendering.
+            takeover.face_order=true
             # A model whose animation gives a bone a value that is no finite number (a division by zero, say):
-            # refuse leaves the model to Yes Steve Model while it has such a value; prune takes it over and leaves
-            # that bone and the bones below it out, which is what the open-source renderer does with such a bone.
-            # /ysm_ar status names the bone and the value in the line of the model ("attributes refused").
-            takeover.non_finite=refuse
+            # prune takes the model over and leaves that bone and the bones below it out, which is what Yes Steve
+            # Model 2.6.5 itself was seen to draw for such a bone; refuse leaves the model to Yes Steve Model while
+            # it has such a value, and /ysm_ar status then names the bone and the value in the line of the model
+            # ("attributes refused").
+            takeover.non_finite=prune
 
             # Milliseconds per frame for building the bone meshes of a model before its first draw; until all are
-            # built the model is drawn the old way. 0 builds everything in one frame.
+            # built the model is drawn the old way. 0 builds everything in one frame. The meshes for the pieces of
+            # a stretched bone (takeover.legacy_shading) are built within the same time when a bone first needs
+            # them; until it has all of them it is drawn in one piece.
             prewarm.ms_per_frame=2
 
             # For picture comparisons only. Not 0: the model drawn by this mod is moved that many pixels to the right
@@ -179,6 +216,17 @@ public final class YsmArConfig {
             note(notes, "stats.interval_seconds is not a whole number");
         }
         statsIntervalSeconds = interval;
+        int idle;
+        try {
+            idle = Integer.parseInt(values.getProperty("models.idle_seconds", "1800").trim());
+        } catch (NumberFormatException ignored) {
+            idle = -1;
+        }
+        if (idle < 0 || idle > 86400) {
+            idle = 1800;
+            note(notes, "models.idle_seconds is not a whole number from 0 to 86400");
+        }
+        modelIdleNanos = idle * 1_000_000_000L;
         takeoverEnabled = flag(values, "takeover.enabled", true, notes);
         Set<String> deny = new LinkedHashSet<>();
         for (String id : values.getProperty("takeover.deny", "").split(";")) {
@@ -187,6 +235,7 @@ public final class YsmArConfig {
             }
         }
         takeoverDeny = Collections.unmodifiableSet(deny);
+        takeoverFolderModels = flag(values, "takeover.folder_models", true, notes);
         float prewarm = 2.0f;
         String prewarmText = values.getProperty("prewarm.ms_per_frame", "2").trim();
         try {
@@ -210,7 +259,9 @@ public final class YsmArConfig {
         takeoverLateRead = flag(values, LATE_READ_KEY, true, notes);
         takeoverIdentityStrict = choice(values, "takeover.identity", "names", "strict", "strict", notes);
         takeoverLegacyGlow = flag(values, "takeover.legacy_glow", true, notes);
-        takeoverPruneNonFinite = choice(values, "takeover.non_finite", "refuse", "prune", notes);
+        takeoverLegacyShading = flag(values, "takeover.legacy_shading", true, notes);
+        takeoverFaceOrder = flag(values, "takeover.face_order", true, notes);
+        takeoverPruneNonFinite = choice(values, "takeover.non_finite", "refuse", "prune", "prune", notes);
         this.problem = notes.length() == 0 ? null : notes.toString();
     }
 
@@ -310,12 +361,16 @@ public final class YsmArConfig {
                 + " standalone.animation=" + (standaloneWave ? "wave" : "rest")
                 + " standalone.scale=" + (Float.isNaN(standaloneScale) ? "(model)" : String.valueOf(standaloneScale))
                 + " stats.interval_seconds=" + statsIntervalSeconds
+                + " models.idle_seconds=" + (modelIdleNanos == 0 ? "0 (never)" : String.valueOf(modelIdleNanos / 1_000_000_000L))
                 + " takeover.enabled=" + takeoverEnabled
                 + " takeover.deny=" + (takeoverDeny.isEmpty() ? "(none)" : takeoverDeny.size() + " id(s)")
+                + " takeover.folder_models=" + takeoverFolderModels
                 + " takeover.pivot_abs=" + (takeoverProvidePivotAbs ? "provide" : "exclude")
                 + " takeover.late_read=" + takeoverLateRead
                 + " takeover.identity=" + (takeoverIdentityStrict ? "strict" : "names")
                 + " takeover.legacy_glow=" + takeoverLegacyGlow
+                + " takeover.legacy_shading=" + takeoverLegacyShading
+                + " takeover.face_order=" + takeoverFaceOrder
                 + " takeover.non_finite=" + (takeoverPruneNonFinite ? "prune" : "refuse")
                 + " prewarm.ms_per_frame=" + (prewarmNanos == 0 ? "0 (no limit)" : String.valueOf(prewarmNanos / 1e6))
                 + (takeoverSideBySide == 0 ? "" : " takeover.debug_side_by_side=" + takeoverSideBySide);

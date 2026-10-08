@@ -8,6 +8,7 @@ import ysmar.YsmArConfig;
 import ysmar.YsmArModels;
 import ysmar.core.Attributes;
 import ysmar.core.ModelData;
+import ysmar.core.ModelFolder;
 
 import java.lang.ref.WeakReference;
 import java.nio.file.Files;
@@ -25,13 +26,20 @@ import java.util.function.LongSupplier;
  * Which of our models stands in for which model object of Yes Steve Model 2.6.5. A binding belongs to one model
  * object and one texture name; it is found by the identity of the model object, which is only held weakly. A
  * binding that cannot be made keeps its reason and is not tried again: a model reload in 2.6.5 creates new model
- * objects, and with them new bindings. Model ids and texture names come from 2.6.5 and may come from a server:
+ * objects, and with them new bindings. What the first binding of a model object was made to is kept: later bindings
+ * of the same model object are held against it. When 2.6.5 read the file or folder of a model object is not known
+ * here; the first binding takes them as they are then. Model ids and texture names come from 2.6.5 and may come from a server:
  * they are cleaned before they are written anywhere, and their number per model object is limited. What a name
  * costs is limited as well: the outcome for a model id and texture name is logged once per session, and the file
- * of a model id is not looked at again within a second. Render thread only.
+ * or folder of a model id is not looked at again within a second. A binding whose model the cache has dropped as
+ * idle is made again when it is asked for, as a first binding is made. Render thread only.
  */
 public final class Bindings {
     private static final Logger LOGGER = LogManager.getLogger("ysm_ar");
+    /**
+     * Model objects kept. A new one takes the place of the one used longest ago, unless that one was used within the
+     * last second: then all of them are in use, none of them makes way, and the new one stays with 2.6.5.
+     */
     private static final int MAX_RECORDS = 256;
     /**
      * Bindings (texture names) kept per model object. A new name takes the place of the one used longest ago, unless
@@ -58,6 +66,18 @@ public final class Bindings {
         int[] textureSize(Object texture);
     }
 
+    /** What the mod file of Yes Steve Model holds among its built-in models under a model id. */
+    public interface Builtins {
+        /** The mod file could not be asked. */
+        int UNKNOWN = -1;
+        int ABSENT = 0;
+        /** A name that is there but is no model: a folder of models, or a file. */
+        int FOLDER = 1;
+        int MODEL = 2;
+
+        int kind(String modelId);
+    }
+
     public static final class Bones {
         public final String[] names;
         /** Why there are no names, else null. */
@@ -75,7 +95,9 @@ public final class Bindings {
         State state = State.LOADING;
         /** Why the model stays with 2.6.5, while REFUSED. */
         String reason;
+        /** The model file, or the folder of a folder model. */
         Path file;
+        boolean folder;
         String textureKey;
         ModelEntry entry;
         boolean retried;
@@ -92,6 +114,8 @@ public final class Bindings {
         String identity;
         long fileSize = -1;
         long fileModified = -1;
+        /** What the file system said about the file or folder when the binding was made; null when it is no file to read. */
+        YsmArModels.FileStamp stamp;
         long lastUsed;
         long lastUsedNanos;
         /** Stands for every texture name beyond the ones kept (see MAX_BINDINGS). */
@@ -125,7 +149,21 @@ public final class Bindings {
             return state;
         }
 
-        public String reason() {
+        /** The counts of the binding this one takes the place of. */
+        void carry(Binding old) {
+            takenOver = old.takenOver;
+            fallbacks = old.fallbacks;
+            lastFallback = old.lastFallback;
+            flaggedBones = old.flaggedBones;
+            pivotRenders = old.pivotRenders;
+            pivotBones = old.pivotBones;
+            lateBones = old.lateBones;
+            latePose = old.latePose;
+            secondExtracts = old.secondExtracts;
+            attributeRefusal = old.attributeRefusal;
+        }
+
+        String reason() {
             return reason;
         }
     }
@@ -138,12 +176,19 @@ public final class Bindings {
         final ArrayList<Binding> bindings = new ArrayList<>(2);
         /** Read once, with the first binding that gets as far as the guards. */
         ContentGuards.Theirs content;
-        /** The file of the model id as it was when this model object was first bound to it. */
+        /**
+         * What this model object was first bound to, once that is known: the file of the model id (for a folder the
+         * file that makes it a model) and, for a folder, everything the model was read from. Later bindings of the
+         * model object are held against it.
+         */
+        boolean baseline;
         long fileSize = -1;
         long fileModified = -1;
+        List<ModelFolder.Opened> opened;
         /** What the file system said about the file of a model id, and when. */
         final HashMap<String, FileCheck> files = new HashMap<>(2);
         Binding overflow;
+        long lastUsedNanos;
 
         Record(Object model, String[] boneNames, String problem) {
             this.model = new WeakReference<>(model);
@@ -164,9 +209,14 @@ public final class Bindings {
     }
 
     private final Path customDirectory;
+    /** Where Yes Steve Model unpacks its built-in models at every start: next to the custom folder. */
+    private final Path builtinDirectory;
+    private final Builtins builtins;
     private Path customReal;
     private final ArrayList<Record> records = new ArrayList<>();
     private Record last;
+    /** Stands for every model object beyond the ones kept (see MAX_RECORDS). */
+    private Binding beyond;
     private long clock;
     private final LongSupplier nanos;
     /** Kept over clear(): the lines of a session, not of a reload. */
@@ -179,10 +229,19 @@ public final class Bindings {
         this(customDirectory, System::nanoTime);
     }
 
-    /** nanos: the clock for "within the last second"; a check puts its own here. */
+    /**
+     * nanos: the clock for "within the last second"; a check puts its own here. Without a mod file to ask for the
+     * built-in models no folder id is taken.
+     */
     public Bindings(Path customDirectory, LongSupplier nanos) {
+        this(customDirectory, nanos, modelId -> Builtins.UNKNOWN);
+    }
+
+    public Bindings(Path customDirectory, LongSupplier nanos, Builtins builtins) {
         this.customDirectory = customDirectory;
+        this.builtinDirectory = customDirectory.resolveSibling("builtin");
         this.nanos = nanos;
+        this.builtins = builtins;
     }
 
     /**
@@ -191,6 +250,9 @@ public final class Bindings {
      */
     public Binding find(Source source, Object model, Object animated, String modelId, String textureName, Object texture)
             throws ReflectiveOperationException {
+        String id = modelId == null ? "" : modelId;
+        String name = textureName == null ? "" : textureName;
+        long now = nanos.getAsLong();
         Record record = last;
         if (record == null || !record.model.refersTo(model)) {
             record = null;
@@ -201,15 +263,16 @@ public final class Bindings {
                 }
             }
             if (record == null) {
-                sweep();
+                if (!sweep(now)) {
+                    return tooMany();
+                }
                 Bones bones = source.bones(model);
                 record = new Record(model, bones.names, bones.problem);
                 records.add(record);
             }
             last = record;
         }
-        String id = modelId == null ? "" : modelId;
-        String name = textureName == null ? "" : textureName;
+        record.lastUsedNanos = now;
         Binding binding = null;
         for (int index = 0; index < record.bindings.size(); index++) {
             Binding candidate = record.bindings.get(index);
@@ -218,7 +281,13 @@ public final class Bindings {
                 break;
             }
         }
-        long now = nanos.getAsLong();
+        if (binding != null && binding.state != State.REFUSED && binding.entry != null && binding.entry.droppedIdle()) {
+            // Our copy went while no entity showed the model: it is read again, and Yes Steve Model draws until it is there.
+            Binding again = create(record, id, name, now);
+            again.carry(binding);
+            record.bindings.set(record.bindings.indexOf(binding), again);
+            binding = again;
+        }
         if (binding == null) {
             if (record.bindings.size() >= MAX_BINDINGS) {
                 int oldest = 0;
@@ -237,6 +306,9 @@ public final class Bindings {
         }
         binding.lastUsed = ++clock;
         binding.lastUsedNanos = now;
+        if (binding.entry != null) {
+            binding.entry.shown();
+        }
         if (binding.state == State.LOADING) {
             advance(source, record, binding, model, animated, texture);
         } else if (binding.state == State.READY && binding.entry.data() == null) {
@@ -249,6 +321,7 @@ public final class Bindings {
     public void clear() {
         records.clear();
         last = null;
+        beyond = null;
         customReal = null;
     }
 
@@ -263,7 +336,7 @@ public final class Bindings {
     }
 
     /** Lines logged about bindings in this session; never more than MAX_LOGGED. */
-    public long logLines() {
+    long logLines() {
         return logLines;
     }
 
@@ -281,7 +354,7 @@ public final class Bindings {
     }
 
     /** How many bindings are kept for the model object. */
-    public int bindingCount(Object model) {
+    int bindingCount(Object model) {
         for (Record record : records) {
             if (record.model.refersTo(model)) {
                 return record.bindings.size();
@@ -290,7 +363,7 @@ public final class Bindings {
         return 0;
     }
 
-    /** One line per binding: model id, texture name, file, state or reason, counts. */
+    /** One line per binding: model id, texture name, file or folder, state or reason, counts. */
     public List<String> describe() {
         List<String> lines = new ArrayList<>();
         for (Record record : records) {
@@ -303,7 +376,7 @@ public final class Bindings {
             for (Binding binding : listed) {
                 StringBuilder line = new StringBuilder("binding ").append(label(binding.modelId, "(no id)"))
                         .append(" [texture ").append(binding.overflow ? "(every name beyond the " + MAX_BINDINGS + " kept)" : label(binding.textureName, "(none)"))
-                        .append("] file=")
+                        .append(binding.folder ? "] folder=" : "] file=")
                         .append(binding.file == null ? "-" : Text.clean(customDirectory.toAbsolutePath().normalize().relativize(binding.file).toString()))
                         .append(": ");
                 switch (binding.state) {
@@ -315,6 +388,9 @@ public final class Bindings {
                             line.append(", ").append(binding.glowBones).append(" of them named ").append(AttributeMap.GLOW_PREFIX)
                                     .append(YsmArConfig.current().takeoverLegacyGlow ? "* and drawn at full light"
                                             : "* (drawn at the light of the entity: takeover.legacy_glow=false)");
+                        }
+                        if (binding.entry.droppedIdle()) {
+                            line.append("; our copy was dropped as idle and is read again when the model is shown");
                         }
                     }
                 }
@@ -345,6 +421,9 @@ public final class Bindings {
                 lines.add(line.toString());
             }
         }
+        if (beyond != null) {
+            lines.add("binding (every model object beyond the " + MAX_RECORDS + " kept): STAYS WITH YSM: " + beyond.reason);
+        }
         return lines;
     }
 
@@ -359,6 +438,19 @@ public final class Bindings {
             logOnce("overflow", binding, "ysm_ar: {}: {}; the names beyond those stay with Yes Steve Model", label(modelId, "(no id)"), binding.reason);
         }
         return record.overflow;
+    }
+
+    /** The one binding that answers for every model object beyond the ones kept. Nothing is read or loaded for it. */
+    private Binding tooMany() {
+        if (beyond == null) {
+            Binding binding = new Binding("", "");
+            binding.overflow = true;
+            binding.state = State.REFUSED;
+            binding.reason = "more than " + MAX_RECORDS + " model objects of Yes Steve Model are in use at once";
+            beyond = binding;
+            logOnce("models", binding, "ysm_ar: {}; the model objects beyond those stay with Yes Steve Model", binding.reason);
+        }
+        return beyond;
     }
 
     /**
@@ -385,6 +477,11 @@ public final class Bindings {
         Path file = ModelFiles.resolve(customDirectory, modelId);
         if (file == null) {
             check.refusal = "the model id does not stay below the custom folder";
+        } else if (!ModelFiles.packed(modelId)) {
+            fileChecks++;
+            long before = YsmArModels.fileChecks();
+            check.refusal = folderCheck(check, file, modelId);
+            fileChecks += YsmArModels.fileChecks() - before;
         } else {
             fileChecks++;
             try {
@@ -397,10 +494,14 @@ public final class Bindings {
                     check.refusal = "the file of the model id lies outside the custom folder";
                 } else {
                     BasicFileAttributes attributes = Files.readAttributes(real, BasicFileAttributes.class);
-                    check.file = file;
-                    check.size = attributes.size();
-                    check.modified = attributes.lastModifiedTime().toMillis();
-                    check.stamp = attributes.isRegularFile() ? new YsmArModels.FileStamp(real.toString(), check.size, check.modified) : null;
+                    if (attributes.isDirectory()) {
+                        check.refusal = ModelFolder.NAMED_LIKE_A_FILE;
+                    } else {
+                        check.file = file;
+                        check.size = attributes.size();
+                        check.modified = attributes.lastModifiedTime().toMillis();
+                        check.stamp = attributes.isRegularFile() ? new YsmArModels.FileStamp(real.toString(), check.size, check.modified, 0) : null;
+                    }
                 }
             } catch (Exception missing) {
                 check.refusal = "no such file below the custom folder";
@@ -413,6 +514,74 @@ public final class Bindings {
         return check;
     }
 
+    /**
+     * An id without the .ysm ending: a folder below custom, or a built-in model. When both are there, Yes Steve
+     * Model shows the built-in one for a player and the folder for a maid, and nothing it tells says which: such an
+     * id is never taken. A built-in model is one the mod file of Yes Steve Model holds or one that lies where the
+     * built-in models are unpacked at every start; the unpacked folder alone can be incomplete. Returns why the
+     * folder cannot stand in for the model, or null with the check filled in: the folder, and the stamp of the file
+     * that makes it a model.
+     */
+    private String folderCheck(FileCheck check, Path folder, String modelId) {
+        for (String part : modelId.split("/", -1)) {
+            if (ModelFolder.namedLikeFile(part)) {
+                return ModelFolder.NAMED_LIKE_A_FILE;
+            }
+        }
+        int inModFile = builtins.kind(modelId);
+        int builtin = inModFile;
+        Path unpacked = ModelFiles.resolve(builtinDirectory, modelId);
+        if (unpacked == null || Files.exists(unpacked)) {
+            builtin = Math.max(builtin, unpacked != null && Files.isDirectory(unpacked) && ModelFolder.marker(unpacked) != null ? Builtins.MODEL : Builtins.FOLDER);
+        }
+        if (builtin == Builtins.MODEL) {
+            return Files.isDirectory(folder) ? "the id of this folder is also found among the built-in models, and nothing tells which of the two an entity shows:"
+                    + " both stay with Yes Steve Model" : "a built-in model (built-in models stay with Yes Steve Model)";
+        }
+        if (builtin == Builtins.FOLDER) {
+            return Files.isDirectory(folder) ? "the id of this folder is also a name among the built-in models of Yes Steve Model (a folder of them or a file, no model):"
+                    + " what an entity shows under such an id was not looked at, it stays with Yes Steve Model"
+                    : "a name among the built-in models of Yes Steve Model that is no model (a folder of them or a file), and no folder below the custom folder";
+        }
+        if (inModFile == Builtins.UNKNOWN) {
+            return "the mod file of Yes Steve Model could not be asked for its built-in models: a folder model cannot be told from a built-in one";
+        }
+        Path real;
+        try {
+            if (customReal == null) {
+                customReal = customDirectory.toRealPath();
+            }
+            real = folder.toRealPath();
+        } catch (Exception missing) {
+            return "no such folder below the custom folder";
+        }
+        if (!real.startsWith(customReal)) {
+            return "the folder of the model id lies outside the custom folder";
+        }
+        if (!Files.isDirectory(real)) {
+            return "the model id names a file that is no .ysm file";
+        }
+        // The id has to be the name the folder has: Yes Steve Model was seen to write ids that way and no other.
+        Path below = customReal.relativize(real);
+        String[] parts = modelId.split("/", -1);
+        boolean named = below.getNameCount() == parts.length;
+        for (int index = 0; named && index < parts.length; index++) {
+            named = below.getName(index).toString().equals(parts[index]);
+        }
+        if (!named) {
+            return "the model id is not the name the folder has (letters in another case, a short name or a link): such an id was not seen from Yes Steve Model";
+        }
+        try {
+            check.stamp = YsmArModels.folderStamp(real);
+        } catch (Exception noModel) {
+            return "a folder with neither " + ModelFolder.MANIFEST + " nor " + ModelFolder.OLD_MODEL;
+        }
+        check.file = folder;
+        check.size = check.stamp.size();
+        check.modified = check.stamp.modified();
+        return null;
+    }
+
     private Binding create(Record record, String modelId, String textureName, long now) {
         created++;
         Binding binding = new Binding(modelId, textureName);
@@ -423,6 +592,10 @@ public final class Bindings {
         if (refusal != null) {
             return refuse(binding, refusal);
         }
+        binding.folder = !ModelFiles.packed(modelId);
+        if (binding.folder && !YsmArConfig.current().takeoverFolderModels) {
+            return refuse(binding, "not a .ysm file: built-in models stay with Yes Steve Model, and so do folder models with takeover.folder_models=false");
+        }
         if (record.problem != null) {
             return refuse(binding, record.problem);
         }
@@ -431,20 +604,28 @@ public final class Bindings {
             return refuse(binding, check.refusal);
         }
         Path file = check.file;
+        binding.file = file;
         binding.fileSize = check.size;
         binding.fileModified = check.modified;
-        if (record.fileSize < 0) {
+        binding.stamp = check.stamp;
+        if (!binding.folder && !record.baseline) {
+            // A model file is all its model is read from: what has to be known of it is known before anything is read.
+            record.baseline = true;
             record.fileSize = binding.fileSize;
             record.fileModified = binding.fileModified;
+            record.opened = List.of();
+        } else if (binding.folder && !record.baseline && check.stamp != null) {
+            // An earlier request has read the folder as it is now: what it was read from is known without reading it again.
+            baseline(record, binding, YsmArModels.knownOpened(check.stamp));
         }
-        binding.file = file;
         binding.textureKey = textureName.isEmpty() ? null : textureName;
         // A texture name the file is already known not to have asks for no load: such names are free text.
         List<String> known = check.stamp == null ? List.of() : YsmArModels.knownTextureKeys(check.stamp);
         if (!known.isEmpty()) {
             String chosen = TextureKeys.choose(textureName, known);
             if (chosen == null) {
-                return refuse(binding, "texture \"" + Text.clean(textureName) + "\" is not among the " + known.size() + " texture keys of the file");
+                return refuse(binding, "texture \"" + Text.clean(textureName) + "\" is not among the " + known.size() + " texture keys of the "
+                        + (binding.folder ? "folder" : "file"));
             }
             binding.textureKey = chosen;
             binding.retried = true;
@@ -461,13 +642,18 @@ public final class Bindings {
         if (state == ModelEntry.State.LOADING) {
             return;
         }
+        // A model that could not be read (a file held by another program) tells nothing of what the folder holds.
+        if (binding.folder && !record.baseline && !entry.notRead()) {
+            baseline(record, binding, entry.opened());
+        }
         List<String> keys = entry.textureKeys();
         String chosen = TextureKeys.choose(binding.textureName, keys);
         ModelData data = entry.data();
         boolean rightTexture = data != null && chosen != null && chosen.equals(data.textureKey);
         if (!rightTexture && !keys.isEmpty()) {
             if (chosen == null) {
-                refuse(binding, "texture \"" + Text.clean(binding.textureName) + "\" is not among the " + keys.size() + " texture keys of the file");
+                refuse(binding, "texture \"" + Text.clean(binding.textureName) + "\" is not among the " + keys.size() + " texture keys of the "
+                        + (binding.folder ? "folder" : "file"));
                 return;
             }
             if (!binding.retried && !chosen.equals(binding.textureKey)) {
@@ -475,7 +661,7 @@ public final class Bindings {
                 binding.retried = true;
                 binding.textureKey = chosen;
                 long before = YsmArModels.fileChecks();
-                binding.entry = YsmArModels.request(binding.file, chosen);
+                binding.entry = YsmArModels.request(binding.file, chosen, false, binding.stamp);
                 fileChecks += YsmArModels.fileChecks() - before;
                 return;
             }
@@ -485,17 +671,17 @@ public final class Bindings {
             return;
         }
         if (!rightTexture) {
-            refuse(binding, "the file gives no texture for \"" + Text.clean(binding.textureName) + "\"");
+            refuse(binding, "the " + (binding.folder ? "folder" : "file") + " gives no texture for \"" + Text.clean(binding.textureName) + "\"");
             return;
         }
         BonePermutation permutation = BonePermutation.build(Arrays.asList(record.boneNames), entry.boneNames(), data.emptyBoneName);
         if (permutation.failure != null) {
-            refuse(binding, permutation.failure);
+            refuse(binding, worded(binding, permutation.failure));
             return;
         }
         if (YsmArConfig.current().takeoverIdentityStrict) {
             ContentGuards.Result result = guards(source, record, binding, model, animated, texture, data, permutation.indices);
-            binding.identity = result.describe();
+            binding.identity = worded(binding, result.describe());
             if (result.refusal != null) {
                 refuse(binding, result.refusal);
                 return;
@@ -541,12 +727,41 @@ public final class Bindings {
         mine.chains = theirs.chains;
         mine.textureWidth = size == null || size.length != 2 ? -1 : size[0];
         mine.textureHeight = size == null || size.length != 2 ? -1 : size[1];
-        mine.fileUnchanged = record.fileSize < 0 || binding.fileSize < 0 ? null
-                : record.fileSize == binding.fileSize && record.fileModified == binding.fileModified;
-        return ContentGuards.evaluate(mine, data, permutation);
+        // A model folder is more than the file that marks it: the files this model was read from count as well.
+        List<ModelFolder.Opened> opened = binding.entry.opened();
+        mine.fileUnchanged = !record.baseline || binding.fileSize < 0 ? null
+                : record.fileSize == binding.fileSize && record.fileModified == binding.fileModified && record.opened.equals(opened);
+        mine.fileEntries = Math.max(1, opened.size());
+        mine.fileNote = "since this model was first bound";
+        ContentGuards.Result result = ContentGuards.evaluate(mine, data, permutation);
+        result.refusal = worded(binding, result.refusal);
+        return result;
+    }
+
+    /** The checks of names and content speak of "the file"; for a folder model the same texts say "folder". */
+    private static String worded(Binding binding, String text) {
+        return binding.folder && text != null ? text.replace("file", "folder") : text;
+    }
+
+    /**
+     * A model folder is known by what its model was read from, which the loader tells, also for a model it then
+     * refused: the first binding of a model object that knows it sets what later ones are held against. A list that
+     * is empty was never made and decides nothing.
+     */
+    private static void baseline(Record record, Binding binding, List<ModelFolder.Opened> opened) {
+        if (!opened.isEmpty()) {
+            record.baseline = true;
+            record.fileSize = binding.fileSize;
+            record.fileModified = binding.fileModified;
+            record.opened = opened;
+        }
     }
 
     private Binding refuse(Binding binding, String reason) {
+        if (binding.state == State.READY && binding.identity != null) {
+            // The guards were asked when the binding was made; of now they say nothing.
+            binding.identity = "when it was bound: " + binding.identity;
+        }
         binding.state = State.REFUSED;
         binding.reason = reason;
         binding.permutation = null;
@@ -562,12 +777,26 @@ public final class Bindings {
         return text.isEmpty() ? empty : Text.clean(text);
     }
 
-    /** Forgets model objects that are gone, and the oldest ones when there are too many. */
-    private void sweep() {
+    /**
+     * Makes room for one more model object: forgets those that are gone and, when there are still too many, the one
+     * used longest ago. False when even that one was used within the last second: nothing is forgotten then.
+     */
+    private boolean sweep(long now) {
         records.removeIf(record -> record.model.get() == null);
-        while (records.size() >= MAX_RECORDS) {
-            records.remove(0);
+        if (records.size() < MAX_RECORDS) {
+            return true;
         }
+        Record longestAgo = records.get(0);
+        for (Record record : records) {
+            if (record.lastUsedNanos < longestAgo.lastUsedNanos) {
+                longestAgo = record;
+            }
+        }
+        if (now - longestAgo.lastUsedNanos < IN_USE_NANOS) {
+            return false;
+        }
+        records.remove(longestAgo);
+        return true;
     }
 
     /** Position of every name in the list, for a source that has to find bones by name. */

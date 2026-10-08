@@ -31,6 +31,7 @@ public final class ClientSetup {
 
     private static Path configDirectory;
     private static long statsDeadline;
+    private static int ticksSinceSweep;
 
     private ClientSetup() {
     }
@@ -84,7 +85,15 @@ public final class ClientSetup {
     }
 
     private static void onClientTick(ClientTickEvent.Post event) {
-        int interval = YsmArConfig.current().statsIntervalSeconds;
+        YsmArConfig config = YsmArConfig.current();
+        // Twenty ticks are a second or more: often enough for a time that is counted in minutes.
+        if (config.modelIdleNanos > 0 && ++ticksSinceSweep >= 20) {
+            ticksSinceSweep = 0;
+            if (YsmArSubmitter.mergesMeshes()) {
+                YsmArModels.dropIdle(System.nanoTime(), config.modelIdleNanos);
+            }
+        }
+        int interval = config.statsIntervalSeconds;
         if (interval <= 0) {
             return;
         }

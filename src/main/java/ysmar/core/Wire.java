@@ -153,6 +153,25 @@ final class Wire {
         destination.write(content, 0, length);
     }
 
+    /** Appends a varint field. */
+    static void writeVarint(ByteArrayOutputStream destination, int field, long value) {
+        writeVarint(destination, (long) field << 3 | VARINT);
+        writeVarint(destination, value);
+    }
+
+    /** Appends the first count values as a repeated float field in its packed form. */
+    static void writeFloats(ByteArrayOutputStream destination, int field, float[] values, int count) {
+        writeVarint(destination, (long) field << 3 | BYTES);
+        writeVarint(destination, count * 4L);
+        for (int index = 0; index < count; index++) {
+            int bits = Float.floatToRawIntBits(values[index]);
+            destination.write(bits);
+            destination.write(bits >>> 8);
+            destination.write(bits >>> 16);
+            destination.write(bits >>> 24);
+        }
+    }
+
     private static void writeVarint(ByteArrayOutputStream destination, long value) {
         while ((value & ~0x7FL) != 0) {
             destination.write((int) (value & 0x7F) | 0x80);

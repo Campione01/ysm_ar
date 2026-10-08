@@ -292,7 +292,7 @@ public final class Takeover {
     private static boolean activate() {
         try {
             handles = YsmHandles.resolve();
-            bindings = new Bindings(FMLPaths.CONFIGDIR.get().resolve(YsmHandles.MOD_ID).resolve("custom"));
+            bindings = new Bindings(FMLPaths.CONFIGDIR.get().resolve(YsmHandles.MOD_ID).resolve("custom"), System::nanoTime, new ModFileBuiltins());
             lateHookAnswers = probeLateHook();
             textureEventHeard = listenForPlayerTextures(handles);
             activation = ACTIVE;
@@ -483,7 +483,8 @@ public final class Takeover {
                 String detail = Attributes.refusal(binding.attributes, binding.bones, config.takeoverPruneNonFinite, binding.permutation);
                 if (detail != null) {
                     bindings.attributesRefused(binding, detail.replace("of the caller", "of Yes Steve Model")
-                            + (detail.contains("not finite") ? "; takeover.non_finite=refuse leaves such a model to Yes Steve Model" : ""));
+                            + (detail.contains("not finite") ? "; takeover.non_finite=refuse leaves such a model to Yes Steve Model, prune draws"
+                            + " it without that bone and the bones below it" : ""));
                 }
             }
             return fallback(binding, rejection == YsmArStats.Rejection.PREWARMING ? Fallback.PREWARMING : Fallback.SUBMIT);

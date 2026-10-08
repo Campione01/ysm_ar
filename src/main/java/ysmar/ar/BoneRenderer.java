@@ -11,18 +11,23 @@ import net.minecraft.client.renderer.texture.OverlayTexture;
 import org.joml.Matrix3f;
 import org.joml.Matrix4f;
 import ysmar.core.BoneMesh;
+import ysmar.core.VertexSink;
 
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Draws one mesh class of one bone. The Accelerated Rendering mesh is built on the first draw per vertex layout and
- * kept for the life of this object.
+ * Draws one mesh class of one bone, or one shading part of it. The Accelerated Rendering mesh is built on the first
+ * draw per vertex layout and kept for the life of this object.
  *
  * The mesh does not depend on anything a resource reload changes, and it is built without reloadSensitive: such
  * meshes live in buffers Accelerated Rendering neither resets nor frees before the game closes, so the cached
  * objects stay valid across a reload. The plain collector is used on purpose: the culled one downloads the texture
  * once per location and keeps that copy until the next reload.
+ *
+ * A bone that shares a face with another bone (BoneMesh.partners) has a second mesh of the same vertices, from the
+ * builder whose meshes come out in the order of the draw calls; which of the two a draw writes is said before the
+ * draw. It is one object either way: whoever follows a bone from frame to frame by this object keeps following it.
  */
 final class BoneRenderer implements IAcceleratedRenderer<Void> {
     private static final int MAX_CACHED = 8;
@@ -31,16 +36,26 @@ final class BoneRenderer implements IAcceleratedRenderer<Void> {
     private final int meshClass;
     private final boolean reversed;
     private final IMesh.Builder builder;
+    /** The builder of the second mesh, or null for a bone that needs none. */
+    private final IMesh.Builder orderedBuilder;
+    /** The shading part of the mesh this object draws (see BoneMesh.parts), or -1 for the whole mesh class. */
+    private final int part;
+
+    /** Set before each draw: the mesh of this draw has to come out in the order of the draw calls. */
+    boolean inCallOrder;
 
     private Object lastKey;
-    private IMesh lastMesh;
-    private Map<Object, IMesh> cached;
+    /** The mesh of the builder, then that of the ordered builder; an entry is null until it is built. */
+    private IMesh[] lastMeshes;
+    private Map<Object, IMesh[]> cached;
 
-    BoneRenderer(BoneMesh mesh, int meshClass, boolean reversed, IMesh.Builder builder) {
+    BoneRenderer(BoneMesh mesh, int meshClass, boolean reversed, IMesh.Builder builder, IMesh.Builder orderedBuilder, int part) {
         this.mesh = mesh;
         this.meshClass = meshClass;
         this.reversed = reversed;
         this.builder = builder;
+        this.orderedBuilder = orderedBuilder;
+        this.part = part;
     }
 
     /**
@@ -52,22 +67,29 @@ final class BoneRenderer implements IAcceleratedRenderer<Void> {
         return extension instanceof AcceleratedBufferBuilder plain ? plain.getLayout() : extension;
     }
 
+    /** True when every mesh this object can draw exists for the key. */
     boolean has(Object key) {
-        return lastMesh != null && key == lastKey || cached != null && cached.containsKey(key);
+        IMesh[] built = key == lastKey ? lastMeshes : cached == null ? null : cached.get(key);
+        return built != null && built[0] != null && (orderedBuilder == null || built[1] != null);
     }
 
-    /** Builds the mesh for the layout of this consumer now, so that the first draw does not have to. */
+    /** Builds one mesh that is missing for the layout of this consumer now, so that the first draw does not have to. */
     void prepare(IAcceleratedVertexConsumer extension) {
-        meshFor(extension);
+        IMesh[] built = meshesFor(extension);
+        if (built[0] == null) {
+            built[0] = build(extension, builder);
+        } else if (orderedBuilder != null && built[1] == null) {
+            built[1] = build(extension, orderedBuilder);
+        }
     }
 
-    private IMesh meshFor(IAcceleratedVertexConsumer extension) {
+    private IMesh[] meshesFor(IAcceleratedVertexConsumer extension) {
         Object key = key(extension);
-        IMesh built = lastMesh;
-        if (key != lastKey) {
+        IMesh[] built = lastMeshes;
+        if (key != lastKey || built == null) {
             built = cached == null ? null : cached.get(key);
             if (built == null) {
-                built = build(extension);
+                built = new IMesh[2];
                 if (cached == null) {
                     cached = new HashMap<>();
                 } else if (cached.size() >= MAX_CACHED) {
@@ -76,7 +98,7 @@ final class BoneRenderer implements IAcceleratedRenderer<Void> {
                 cached.put(key, built);
             }
             lastKey = key;
-            lastMesh = built;
+            lastMeshes = built;
         }
         return built;
     }
@@ -84,7 +106,13 @@ final class BoneRenderer implements IAcceleratedRenderer<Void> {
     @Override
     public void render(VertexConsumer vertexConsumer, Void context, Matrix4f transform, Matrix3f normal, int light, int overlay, int color) {
         IAcceleratedVertexConsumer extension = VertexConsumerExtension.getAccelerated(vertexConsumer);
-        IMesh built = meshFor(extension);
+        IMesh[] meshes = meshesFor(extension);
+        int way = inCallOrder && orderedBuilder != null ? 1 : 0;
+        IMesh built = meshes[way];
+        if (built == null) {
+            built = build(extension, way == 0 ? builder : orderedBuilder);
+            meshes[way] = built;
+        }
         extension.beginTransform(transform, normal);
         try {
             built.write(extension, color, light, overlay);
@@ -93,13 +121,18 @@ final class BoneRenderer implements IAcceleratedRenderer<Void> {
         }
     }
 
-    private IMesh build(IAcceleratedVertexConsumer extension) {
+    private IMesh build(IAcceleratedVertexConsumer extension, IMesh.Builder with) {
         SimpleMeshCollector collector = new SimpleMeshCollector(extension.getLayout());
         VertexConsumer target = extension.decorate(collector);
         // Colour white and light 0: Accelerated Rendering combines them with the colour and light of each draw.
-        mesh.emit(meshClass, reversed, (x, y, z, u, v, normalX, normalY, normalZ) ->
-                target.addVertex(x, y, z, -1, u, v, OverlayTexture.NO_OVERLAY, 0, normalX, normalY, normalZ));
+        VertexSink sink = (x, y, z, u, v, normalX, normalY, normalZ) ->
+                target.addVertex(x, y, z, -1, u, v, OverlayTexture.NO_OVERLAY, 0, normalX, normalY, normalZ);
+        if (part < 0) {
+            mesh.emit(meshClass, reversed, sink);
+        } else {
+            mesh.emitPart(part, reversed, sink);
+        }
         collector.flush();
-        return builder.build(collector);
+        return with.build(collector);
     }
 }

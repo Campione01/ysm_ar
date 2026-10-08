@@ -44,6 +44,9 @@ public final class ContentGuards {
         public int textureHeight = -1;
         /** Whether the file is still the one this model object was first bound to; null when that is not known. */
         public Boolean fileUnchanged;
+        /** How many files and folders that is said of, and since when (for the status), or null. */
+        public int fileEntries = 1;
+        public String fileNote;
     }
 
     public static final class Result {
@@ -52,20 +55,22 @@ public final class ContentGuards {
         public final int[] compared = new int[Guard.values().length];
         /** Why the file must not stand in for the model, or null. */
         public String refusal;
+        /** Since when the file is unchanged, said after that guard; or null. */
+        public String fileNote;
 
         Result() {
             java.util.Arrays.fill(differing, -1);
         }
 
-        public boolean available(Guard guard) {
+        boolean available(Guard guard) {
             return differing[guard.ordinal()] >= 0;
         }
 
-        public int differing(Guard guard) {
+        int differing(Guard guard) {
             return differing[guard.ordinal()];
         }
 
-        public int compared(Guard guard) {
+        int compared(Guard guard) {
             return compared[guard.ordinal()];
         }
 
@@ -79,6 +84,9 @@ public final class ContentGuards {
                     text.append("not available");
                 } else if (differing[index] == 0) {
                     text.append("ok (").append(compared[index]).append(')');
+                    if (guard == Guard.FILE && fileNote != null) {
+                        text.append(' ').append(fileNote);
+                    }
                 } else {
                     text.append("DIFFERS (").append(differing[index]).append(" of ").append(compared[index]).append(')');
                 }
@@ -154,7 +162,8 @@ public final class ContentGuards {
         compare(result, Guard.PIVOTS, theirs.pivots, ours.pivots, permutation, PIVOT_TOLERANCE);
         compare(result, Guard.ROTATIONS, theirs.rotations, ours.restRotations, permutation, ROTATION_TOLERANCE);
         if (theirs.fileUnchanged != null) {
-            set(result, Guard.FILE, 1, theirs.fileUnchanged ? 0 : 1);
+            set(result, Guard.FILE, Math.max(1, theirs.fileEntries), theirs.fileUnchanged ? 0 : 1);
+            result.fileNote = theirs.fileNote;
             if (!theirs.fileUnchanged) {
                 refuse(result, Guard.FILE, "the file was changed after 2.6.5 loaded this model (/ysm model reload makes 2.6.5 read it again)");
             }

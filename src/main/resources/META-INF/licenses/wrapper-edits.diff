@@ -53,129 +53,78 @@
      private static native int nBlake3(Object source, long sourceFlags, byte[] hash, int op);
 --- official/src/main/java/com/elfmcys/ysm/natives/NativeArchive.java
 +++ wrapper-src/com/elfmcys/ysm/natives/NativeArchive.java
-@@ -1,117 +1,16 @@
+@@ -1,11 +1,10 @@
 +// Modified copy of a Yes Steve Model source file (Apache-2.0), upstream commit 74c53b58b2f9.
-+// Change: reduced to the class header and its native method declarations (annotations dropped).
++// Change: does not implement VirtualFileSystem, which is not part of this copy (annotations dropped).
  package com.elfmcys.ysm.natives;
  
--import com.elfmcys.ysm.buffer.NativeBuffer;
+ import com.elfmcys.ysm.buffer.NativeBuffer;
 -import com.elfmcys.ysm.buffer.annotation.Borrowed;
 -import com.elfmcys.ysm.format.vfs.VirtualFileSystem;
--import com.elfmcys.ysm.util.CleanerUtil;
--import com.elfmcys.ysm.util.Closeable;
+ import com.elfmcys.ysm.util.CleanerUtil;
+ import com.elfmcys.ysm.util.Closeable;
 -import org.jetbrains.annotations.Nullable;
--
--import java.lang.ref.Cleaner;
--import java.lang.ref.Reference;
--import java.nio.ByteBuffer;
--import java.util.concurrent.atomic.AtomicBoolean;
--
--// 目前支持 zip、7z、旧版 ysm
+ 
+ import java.lang.ref.Cleaner;
+ import java.lang.ref.Reference;
+@@ -13,7 +12,7 @@
+ import java.util.concurrent.atomic.AtomicBoolean;
+ 
+ // 目前支持 zip、7z、旧版 ysm
 -public class NativeArchive implements VirtualFileSystem, Closeable {
--    private final long ptr;
--    private final State state;
--    private final Cleaner.Cleanable cleanable;
--
--    public NativeArchive(String path) {
--        ptr = nCreate(path);
--        if (ptr == 0) {
--            throw new IllegalArgumentException("Could not open archive: " + path);
--        }
--        state = new State(ptr);
--        cleanable = CleanerUtil.ref(this, state, State::clean);
--    }
--
--    private void checkClosed() {
--        if (!state.open.get()) {
--            throw new IllegalStateException("Already Closed");
--        }
--    }
--
++public class NativeArchive implements Closeable {
+     private final long ptr;
+     private final State state;
+     private final Cleaner.Cleanable cleanable;
+@@ -33,8 +32,7 @@
+         }
+     }
+ 
 -    @Override
 -    public String[] listFiles(@Nullable String path) {
--        checkClosed();
--        final String[] result;
--        try {
--            result = nList(ptr, path, 0);
--        } finally {
--            Reference.reachabilityFence(this);
--        }
--        if (result == null) {
--            throw new IllegalStateException("Failed to list files");
--        }
--        return result;
--    }
--
++    public String[] listFiles(String path) {
+         checkClosed();
+         final String[] result;
+         try {
+@@ -48,8 +46,7 @@
+         return result;
+     }
+ 
 -    @Override
 -    public String[] listDirectories(@Nullable String path) {
--        checkClosed();
--        final String[] result;
--        try {
--            result = nList(ptr, path, 1);
--        } finally {
--            Reference.reachabilityFence(this);
--        }
--        if (result == null) {
--            throw new IllegalStateException("Failed to list directories");
--        }
--        return result;
--    }
--
++    public String[] listDirectories(String path) {
+         checkClosed();
+         final String[] result;
+         try {
+@@ -63,7 +60,6 @@
+         return result;
+     }
+ 
 -    @Override
--    public boolean hasFile(String fileName) {
--        checkClosed();
--        // 随便返回个东西
--        try {
--            return nGetFile(ptr, fileName, true) != null;
--        } finally {
--            Reference.reachabilityFence(this);
--        }
--    }
--
+     public boolean hasFile(String fileName) {
+         checkClosed();
+         // 随便返回个东西
+@@ -74,9 +70,7 @@
+         }
+     }
+ 
 -    @Borrowed
 -    @Override
 -    public @Nullable NativeBuffer getFile(String fileName) {
--        checkClosed();
--        final Object buf;
--        try {
--            buf = nGetFile(ptr, fileName, false);
--        } finally {
--            Reference.reachabilityFence(this);
--        }
--        if (buf == null) {
--            return null;
--        }
--        return NativeBuffer.borrow((ByteBuffer) buf);
--    }
--
--    @Override
--    public void close() {
--        cleanable.clean();
-+public class NativeArchive {
-+    private NativeArchive() {
++    public NativeBuffer getFile(String fileName) {
+         checkClosed();
+         final Object buf;
+         try {
+@@ -111,7 +105,10 @@
      }
  
--    private static final class State {
--        private final long ptr;
--        private final AtomicBoolean open = new AtomicBoolean(true);
-+    private static native long nCreate(String path);
- 
--        private State(long ptr) {
--            this.ptr = ptr;
--        }
-+    private static native void nDestroy(long ptr);
- 
--        private void clean() {
--            if (open.compareAndSet(true, false)) {
--                nDestroy(ptr);
--            }
--        }
--    }
-+    private static native String[] nList(long ptr, String path, int type);
- 
--    private static native long nCreate(String path);
--    private static native void nDestroy(long ptr);
+     private static native long nCreate(String path);
++
+     private static native void nDestroy(long ptr);
 -    private static native String[] nList(long ptr, @Nullable String path, int type);
++
++    private static native String[] nList(long ptr, String path, int type);
++
      private static native Object nGetFile(long ptr, String fileName, boolean dryRun);
  }
 --- official/src/main/java/com/elfmcys/ysm/natives/NativeProfiler.java

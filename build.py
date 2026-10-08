@@ -21,7 +21,7 @@ import zipfile
 from pathlib import Path
 
 MOD_ID = "ysm_ar"
-VERSION = "0.2.3"
+VERSION = "0.2.4"
 
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src" / "main" / "java"

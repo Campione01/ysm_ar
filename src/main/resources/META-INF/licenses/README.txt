@@ -1,7 +1,12 @@
-ysm_ar 0.2.3: what is in this jar and under which terms
+ysm_ar 0.2.4: what is in this jar and under which terms
 
 ysmar/**
-    The mod itself. Apache License 2.0, see /LICENSE.
+    The mod itself. Copyright 2026 Campione01. Apache License 2.0, see /LICENSE.
+    ysmar/core/ModelFolder reads model folders (ysm.json, or main.json with its textures) by the rules of the
+    package com.elfmcys.ysm.format.parser of the Yes Steve Model source tree, commit 74c53b58b2f9 (Apache
+    License 2.0: LICENSE-yes-steve-model.txt, NOTICE-yes-steve-model.md). No file of that package is copied.
+    Raw model files (the archive of such a folder) are opened with the archive reader of the native library,
+    through the binding com.elfmcys.ysm.natives.NativeArchive, and read by the same rules.
 
 com/elfmcys/ysm/**
     Java bindings of the Yes Steve Model native library, copied from the Yes Steve Model source tree
@@ -29,5 +34,12 @@ ysm_ar/native/ysm.dll
     own (N:\nb\src, N:\nb\conan), so the file names the compiler puts into the library start there.
     Apache License 2.0: LICENSE-yes-steve-model-native.txt.
     It contains third-party components. THIRD_PARTY_LICENSES.md is the inventory kept by that project;
-    third-party/ holds the licence texts the Yes Steve Model project ships for them and for the Java-side
-    components named in its notice file.
+    third-party/ holds the 33 licence texts the Yes Steve Model project ships for them and for the Java-side
+    components named in its notice file, and three texts for parts of the library that project ships none for:
+    jni (the headers of the Java Native Interface; the text is the LICENSE file of OpenJDK 21), miniogg
+    (the text is the one at the end of its source file) and stx-cstringview (STX CStringView,
+    modules/core/src/c_string_view.h of the native source tree, MIT License; the text is the LICENSE file
+    of https://github.com/lamarrr/STX, git blob 451d170f).
+    With these, each of the 29 parts of the library that inventory lists has its text in third-party/.
+    The profiler client the build also compiles (Tracy) is not part of the library.
+    This software is based in part on the work of the Independent JPEG Group.

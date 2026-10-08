@@ -175,6 +175,21 @@ public final class YsmArSubmitter {
         }
     }
 
+    /**
+     * False when Accelerated Rendering would keep a second copy of every mesh of a model that is read again (see
+     * ArBridge.mergesMeshes); true also while it is not there to be asked.
+     */
+    public static boolean mergesMeshes() {
+        if (!arUsable()) {
+            return true;
+        }
+        try {
+            return ArBridge.mergesMeshes();
+        } catch (LinkageError | RuntimeException problem) {
+            return false;
+        }
+    }
+
     /** Looks at the mod list again after the settings were re-read. A link failure stays final. */
     public static void settingsChanged() {
         if (arState != BROKEN) {

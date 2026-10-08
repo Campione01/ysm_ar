@@ -1,5 +1,7 @@
 package ysmar.core;
 
+import java.nio.ByteBuffer;
+
 /**
  * Alpha values of the decoded model texture. Decides for a baked quad whether its texels are binary (0 or 255)
  * or partly transparent, over the same texel rectangle the bake inspected. For a quad whose UVs have no height the
@@ -15,6 +17,8 @@ public final class AlphaPlane {
     private static final int FIRST_VERSION_THAT_LOOKS_UP = 28;
 
     private final byte[] alpha;
+    /** In place of alpha: the texels themselves, four bytes each, the alpha value last. */
+    private final ByteBuffer rgba;
     private final int width;
     private final int height;
     private final boolean looksUp;
@@ -24,7 +28,17 @@ public final class AlphaPlane {
     }
 
     public AlphaPlane(byte[] alpha, int width, int height, int originVersion) {
+        this(alpha, null, width, height, originVersion);
+    }
+
+    /** rgba: the decoded texture, four bytes per texel; it is read whenever a quad is classified and has to stay as it is until then. */
+    public AlphaPlane(ByteBuffer rgba, int width, int height, int originVersion) {
+        this(null, rgba, width, height, originVersion);
+    }
+
+    private AlphaPlane(byte[] alpha, ByteBuffer rgba, int width, int height, int originVersion) {
         this.alpha = alpha;
+        this.rgba = rgba;
         this.width = width;
         this.height = height;
         this.looksUp = originVersion >= FIRST_VERSION_THAT_LOOKS_UP;
@@ -63,7 +77,7 @@ public final class AlphaPlane {
         for (int y = minV; y < maxV; y++) {
             int row = y * width;
             for (int x = minU; x < maxU; x++) {
-                int value = alpha[row + x] & 0xFF;
+                int value = (alpha != null ? alpha[row + x] : rgba.get((row + x) * 4 + 3)) & 0xFF;
                 if (value == 0) {
                     hasTransparent = true;
                 } else {

@@ -16,7 +16,7 @@ Yes Steve Model is not needed to build: the mod reaches it by reflection only. O
 
 1. Copy `build.example.json` to `build.local.json` and enter your paths. A path is absolute or relative to this folder; forward slashes work on Windows. The entry `_about` only explains the others and may stay or go. `build.local.json` is ignored by git.
 2. Run `python build.py` (or `python build.py --quiet`).
-3. The mod is `out/ysm_ar-0.2.3.jar`.
+3. The mod is `out/ysm_ar-0.2.4.jar`.
 
 The script first checks that `src/main/resources/ysm_ar/native/ysm.dll` is the expected file (size and SHA-256). It then compiles the bindings under `src/main/java/com/elfmcys` against JOML, fastutil, LWJGL, the Log4j API and Netty alone, and after that the package `ysmar` against those classes and the game.
 
@@ -24,9 +24,11 @@ The script reads its inputs and writes only into `out/` and `work/` of this fold
 
 ## Reproducing The Released Jar
 
-`ysm_ar-0.2.3.jar` (5,060,048 bytes, SHA-256 `de696c8a0f38a759954529229a33b1ff08a48bd65f89e5a63d864078714a44a9`) was built from these sources with javac 21.0.11 against NeoForge 21.1.227 and Accelerated Rendering 1.0.14-1.21.1-alpha. With the same inputs `build.py` produces the same 216 files byte for byte, the manifest included; the jar file itself differs, because every entry carries the time it was written.
+`ysm_ar-0.2.4.jar` (5,147,525 bytes, SHA-256 `eaa7127fb7ef10c6d4b754f81f490aa0361ca44a2f07231bc9cc647c13cd8a7d`) was built from these sources with javac 21.0.11 against NeoForge 21.1.227 and Accelerated Rendering 1.0.14-1.21.1-alpha. With the same inputs `build.py` produces the same 248 files byte for byte, the manifest included; the jar file itself differs, because every entry carries the time it was written.
 
-`.gitattributes` stores everything under `src/main` byte for byte. The bindings and the licence texts keep the CRLF line endings they came with, and the released jar holds the licence texts in exactly that form.
+0.2.4 was checked in the game with a build that lacked one licence text. The released jar differs from that build in two entries, `META-INF/licenses/README.txt` and `META-INF/licenses/third-party/stx-cstringview`; the other 246 entries, among them all 200 classes and the native library, are the same bytes.
+
+`.gitattributes` stores everything under `src/main` byte for byte. The bindings and the licence texts keep the line endings they came with, which is CRLF for most of them, and the released jar holds the licence texts in exactly that form.
 
 ## The Bindings
 
@@ -41,7 +43,7 @@ The 38 sources under `src/main/java/com/elfmcys/ysm` are the Java bindings of th
 
 It was built with Microsoft Visual C++ 19.44 (toolset 14.44, x64, Release, static runtime), CMake 4.3.2, Ninja 1.12.1, NASM 2.16.03 and Conan 2.29.1 by the two documented commands of that source tree, `bootstrap.cmd setup` and `bootstrap.cmd build native`, with all 29 dependency packages built from their sources in the same run. The source tree and the package cache lay on a drive root of their own, so the source file names the compiler puts into the library start with that neutral root; `src/main/resources/META-INF/licenses/README.txt` names it.
 
-To rebuild it: check out that commit, apply the patch, run the two commands. A rebuild does not give the same bytes, so `NATIVE_SIZE` and `NATIVE_SHA256` in `build.py` and the numbers in the licence `README.txt` have to follow the new file. The third-party components of the library and their licences are listed in `src/main/resources/META-INF/licenses/THIRD_PARTY_LICENSES.md` and `third-party/`.
+To rebuild it: check out that commit, apply the patch, run the two commands. A rebuild does not give the same bytes, so `NATIVE_SIZE` and `NATIVE_SHA256` in `build.py` and the numbers in the licence `README.txt` have to follow the new file. The third-party components of the library are listed in `src/main/resources/META-INF/licenses/THIRD_PARTY_LICENSES.md`, and their licence texts are in `third-party/` next to it; [THIRD-PARTY.md](THIRD-PARTY.md) says where each text is from.
 
 ## Tests
 

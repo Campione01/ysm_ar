@@ -7,17 +7,23 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -31,6 +37,9 @@ import java.util.regex.Pattern;
  * and is only ever put in place whole, by renaming a private temporary file, and never over a file that is already
  * the library: so a file another process has verified or loaded does not go away. Whatever goes wrong with reading
  * or renaming is tried again for a while before it counts as a failure.
+ *
+ * The file whose content was looked at is the file that is loaded: it stays open from the look until the load is
+ * done, for readers only, and while it is open no process can write to it, delete it or move another file over it.
  *
  * Every build of the library has a file name of its own, so the files of earlier versions of this mod stay behind.
  * After a load, those that nobody has written for a week are deleted; one that another game still has loaded
@@ -72,6 +81,15 @@ public final class NativeLoader {
     }
 
     public static boolean ensureLoaded(Path gameDirectory) {
+        return ensureLoaded(gameDirectory, EXTRACT_PATIENCE_NANOS, NativeLoader::load);
+    }
+
+    /** The step that loads the file. The checks put their own in its place: what can be done to the file at that moment. */
+    interface Loading {
+        void load(Path library) throws Exception;
+    }
+
+    static boolean ensureLoaded(Path gameDirectory, long patienceNanos, Loading loading) {
         if (loaded) {
             return true;
         }
@@ -83,8 +101,11 @@ public final class NativeLoader {
                 return false;
             }
             try {
-                Path library = extract(gameDirectory);
-                load(library);
+                Path library;
+                try (Held held = extract(gameDirectory, patienceNanos)) {
+                    library = held.path;
+                    loading.load(library);
+                }
                 location = library.toString();
                 loaded = true;
                 LOGGER.info("ysm_ar: native library loaded from {}", library);
@@ -101,7 +122,39 @@ public final class NativeLoader {
         }
     }
 
-    private static Path extract(Path gameDirectory) throws Exception {
+    /** The library where it lies, open in the way of {@link #holdOptions()}: closed by the caller once it is loaded. */
+    private static final class Held implements AutoCloseable {
+        final Path path;
+        private final FileChannel channel;
+
+        Held(Path path, FileChannel channel) {
+            this.path = path;
+            this.channel = channel;
+        }
+
+        @Override
+        public void close() throws IOException {
+            channel.close();
+        }
+    }
+
+    /** Read access that lets others read; while it is open nobody writes to the file, deletes it or moves a file over it. */
+    private static Set<OpenOption> holdOptions() throws ReflectiveOperationException {
+        Set<OpenOption> options = new HashSet<>();
+        options.add(StandardOpenOption.READ);
+        for (String name : new String[]{"NOSHARE_WRITE", "NOSHARE_DELETE"}) {
+            options.add(extended(name));
+        }
+        return options;
+    }
+
+    // By name: these two options are an API of the JDK itself, which the compiler reports as internal when it is named in the source.
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static OpenOption extended(String name) throws ReflectiveOperationException {
+        return (OpenOption) Enum.valueOf((Class) Class.forName("com.sun.nio.file.ExtendedOpenOption"), name);
+    }
+
+    private static Held extract(Path gameDirectory, long patienceNanos) throws Exception {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
         if (!os.startsWith("windows") || !(arch.equals("amd64") || arch.equals("x86_64"))) {
@@ -120,14 +173,16 @@ public final class NativeLoader {
         Path target = directory.resolve("ysm-" + digest.substring(0, 12) + ".dll");
         Path temporary = directory.resolve(target.getFileName() + "." + ProcessHandle.current().pid() + "-" + Long.toHexString(System.nanoTime()) + ".tmp");
         boolean written = false;
-        long deadline = System.nanoTime() + EXTRACT_PATIENCE_NANOS;
+        boolean lookedOnceMore = false;
+        long deadline = System.nanoTime() + patienceNanos;
+        FileChannel[] held = new FileChannel[1];
         try {
             for (int attempt = 1; ; attempt++) {
                 IOException problem = null;
                 try {
-                    int found = inspect(target, bytes.length, digest);
+                    int found = inspect(target, bytes.length, digest, held);
                     if (found == MATCHES) {
-                        return target;
+                        return new Held(target, held[0]);
                     }
                     if (!written) {
                         Files.write(temporary, bytes);
@@ -146,8 +201,13 @@ public final class NativeLoader {
                     problem = notNow;
                 }
                 if (System.nanoTime() >= deadline) {
-                    throw new IOException("the library could not be put at " + target + " in " + attempt + " attempts"
-                            + (problem == null ? "" : ": " + describe(problem)));
+                    // The patience is for what goes wrong: a file that was just put in place, by this process or by
+                    // another, is still looked at, once.
+                    if (problem != null || lookedOnceMore) {
+                        throw new IOException("the library could not be put at " + target + " in " + attempt + " attempts"
+                                + (problem == null ? "" : ": " + describe(problem)));
+                    }
+                    lookedOnceMore = true;
                 }
                 if (problem != null) {
                     pause(Math.min(200, attempt * 10));
@@ -195,21 +255,39 @@ public final class NativeLoader {
         return removed;
     }
 
-    /** MATCHES, ABSENT or DIFFERS; a file that cannot be read right now is an IOException, which the caller retries. */
-    private static int inspect(Path file, int size, String digest) throws Exception {
-        BasicFileAttributes attributes;
+    /**
+     * MATCHES, ABSENT or DIFFERS; a file that cannot be read right now is an IOException, which the caller retries.
+     * With MATCHES the file is left open in `held`, and its content was read through that very opening.
+     */
+    private static int inspect(Path file, int size, String digest, FileChannel[] held) throws Exception {
+        FileChannel channel;
         try {
-            attributes = Files.readAttributes(file, BasicFileAttributes.class);
+            channel = FileChannel.open(file, holdOptions());
         } catch (NoSuchFileException absent) {
             return ABSENT;
+        } catch (IOException unopened) {
+            if (Files.isDirectory(file)) {
+                throw new IOException("not a file: " + file);
+            }
+            throw unopened;
         }
-        if (!attributes.isRegularFile()) {
-            throw new IOException("not a file: " + file);
+        boolean same = false;
+        try {
+            if (channel.size() == size) {
+                ByteBuffer content = ByteBuffer.allocate(size);
+                while (content.hasRemaining() && channel.read(content, content.position()) > 0) {
+                    // until all of it is read
+                }
+                same = !content.hasRemaining() && sha256(content.array()).equals(digest);
+            }
+        } finally {
+            if (same) {
+                held[0] = channel;
+            } else {
+                channel.close();
+            }
         }
-        if (attributes.size() != size) {
-            return DIFFERS;
-        }
-        return sha256(Files.readAllBytes(file)).equals(digest) ? MATCHES : DIFFERS;
+        return same ? MATCHES : DIFFERS;
     }
 
     private static void pause(long millis) {

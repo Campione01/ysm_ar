@@ -23,6 +23,8 @@ public final class ModelData {
     public String emptyBoneName;
     /** One mesh per bone, null where the bone has no geometry. */
     public BoneMesh[] meshes;
+    /** Bones that have a face exactly where another bone has one (BoneMesh.partners). */
+    public int orderedBones;
     public float heightScale;
     public float widthScale;
     public List<String> textureKeys;

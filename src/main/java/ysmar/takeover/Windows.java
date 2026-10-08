@@ -56,12 +56,12 @@ public final class Windows {
         Window outer;
         int depth;
 
-        public boolean isArmed() {
+        boolean isArmed() {
             return armed;
         }
 
         /** What the visibility test was answered: true, the body is hidden from Yes Steve Model. */
-        public boolean isHidden() {
+        boolean isHidden() {
             return hidden;
         }
     }
@@ -223,7 +223,7 @@ public final class Windows {
         return lost;
     }
 
-    public int armedWindows() {
+    int armedWindows() {
         return armedWindows;
     }
 

@@ -11,6 +11,7 @@ import org.joml.Vector3f;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -21,8 +22,10 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * File to model: legacy import, PLAYER render target, geo model "main", texture, bake, cube walk. Runs on the
- * loader thread. Decoded content stays in memory; messages carry counts and reasons only.
+ * File to model: legacy import, PLAYER render target, geo model "main", texture, bake, cube walk. A model folder
+ * takes the place of the import with its own reader (ModelFolder), and so does a raw model file, which holds the
+ * files of a folder; both go through the same bake and walk. Runs on the loader thread. Decoded content stays in
+ * memory; messages carry counts and reasons only.
  */
 public final class ModelLoader {
     /** The official loader bakes every model with the UV rules of this version, whatever version wrote the file. */
@@ -33,14 +36,74 @@ public final class ModelLoader {
      */
     public static final String EMPTY_BONE_NAME = "ysm_ar:bone_without_name";
     private static final float DEFAULT_SCALE = 0.7f;
+    /** Width and height of a texture read from a model folder; the importer hands over no larger image of a file. */
+    public static final int MAX_TEXTURE_SIZE = 4096;
+    public static final String OUT_OF_MEMORY = "not enough memory to read the model";
+    /**
+     * What the importer says of a raw model file, the archive of a model folder (see ModelFolder): it is no packed
+     * file, and the open-source Yes Steve Model reads such a file with its archive reader, as this class then does.
+     */
+    private static final String RAW_STATUS = "INVALID_CONTENT";
+    private static final String RAW_DIAGNOSTIC = "Raw YSM must be routed to the raw reader";
+    /** What the importer says when it could not read the file at all. */
+    private static final String UNREAD_STATUS = "SOURCE_IO";
     /** Native diagnostics that end in a name taken from the file; only this fixed part of them is reported. */
     private static final String[] DIAGNOSTICS_WITH_A_NAME = {"GUI image has no target role"};
 
     public static final class Refusal extends Exception {
         private static final long serialVersionUID = 1L;
+        private boolean ofTheTexture;
+        private boolean notRead;
+        private boolean worthAnotherTry;
 
         Refusal(String reason) {
             super(reason, null, false, false);
+        }
+
+        /** This refusal, marked as one of the texture that was asked for: the model may load with another. */
+        Refusal ofTheTexture() {
+            ofTheTexture = true;
+            return this;
+        }
+
+        /** True when the texture that was asked for was refused, and not the model whatever its texture. */
+        public boolean isOfTheTexture() {
+            return ofTheTexture;
+        }
+
+        /**
+         * This refusal, marked as one that says nothing about the model: a file of it could not be read when it was
+         * tried (held by another program, access denied). A moment later it may be read, which is worth trying.
+         */
+        Refusal heldFile() {
+            notRead = true;
+            worthAnotherTry = true;
+            return this;
+        }
+
+        /** This refusal, marked as one that says nothing about the model: memory ran short while it was read. */
+        Refusal noMemory() {
+            notRead = true;
+            return this;
+        }
+
+        /** The same refusal in other words. */
+        Refusal worded(String reason) {
+            Refusal other = new Refusal(reason);
+            other.ofTheTexture = ofTheTexture;
+            other.notRead = notRead;
+            other.worthAnotherTry = worthAnotherTry;
+            return other;
+        }
+
+        /** True when the model was not refused for what it holds: it could not be read at that moment. */
+        public boolean notRead() {
+            return notRead;
+        }
+
+        /** True when reading the same file a moment later may go well. */
+        public boolean worthAnotherTry() {
+            return worthAnotherTry;
         }
     }
 
@@ -87,12 +150,39 @@ public final class ModelLoader {
      */
     public static ModelData load(Path file, String textureKeyOrNull, boolean keepPixels, Consumer<List<String>> textureKeys,
                                  boolean fileRules) throws Refusal {
+        return load(file, textureKeyOrNull, keepPixels, textureKeys, fileRules, ignored -> {
+        });
+    }
+
+    /**
+     * A folder in place of a file is read as a model folder (see ModelFolder) and baked like an imported file.
+     * opened is told for such a folder which of its files the model depends on; for a file it is not called.
+     */
+    public static ModelData load(Path file, String textureKeyOrNull, boolean keepPixels, Consumer<List<String>> textureKeys,
+                                 boolean fileRules, Consumer<List<ModelFolder.Opened>> opened) throws Refusal {
+        return load(file, textureKeyOrNull, keepPixels, textureKeys, fileRules, opened, null);
+    }
+
+    /** realFolder: where the folder lay when the caller looked it up, or null; it is read only while it lies there. */
+    public static ModelData load(Path file, String textureKeyOrNull, boolean keepPixels, Consumer<List<String>> textureKeys,
+                                 boolean fileRules, Consumer<List<ModelFolder.Opened>> opened, String realFolder) throws Refusal {
         long start = System.nanoTime();
-        Imported imported = importModel(file, textureKeyOrNull, textureKeys);
+        if (Files.isDirectory(file) && ModelFolder.namedLikeFile(String.valueOf(file.getFileName()))) {
+            throw new Refusal(ModelFolder.NAMED_LIKE_A_FILE);
+        }
         try {
-            return bake(imported, keepPixels, start, fileRules && imported.originVersion >= 0 ? imported.originVersion : ORIGIN_VERSION);
-        } finally {
-            imported.close();
+            Imported imported = Files.isDirectory(file) ? importFolder(file, textureKeyOrNull, textureKeys, opened, realFolder)
+                    : importModel(file, textureKeyOrNull, textureKeys);
+            try {
+                return bake(imported, keepPixels, start, fileRules && imported.originVersion >= 0 ? imported.originVersion : ORIGIN_VERSION);
+            } finally {
+                imported.close();
+            }
+        } catch (OutOfMemoryError exhausted) {
+            // Caught where this load ran into it. What was being built is garbage by now; whether another thread of
+            // the game ran into the same shortage is not known here. How much a model needs is a matter of its
+            // texture as well, and of what else is in memory at that moment: nothing is said of the model itself.
+            throw new Refusal(OUT_OF_MEMORY).ofTheTexture().noMemory();
         }
     }
 
@@ -108,7 +198,12 @@ public final class ModelLoader {
         boolean complete = false;
         try {
             if (!source.succeeded()) {
-                throw new Refusal(importReason(source.statusName(), source.diagnostic()));
+                if (RAW_STATUS.equals(source.statusName()) && RAW_DIAGNOSTIC.equals(source.diagnostic())) {
+                    return adopt(ModelFolder.readArchive(file, textureKeyOrNull, textureKeys), start);
+                }
+                Refusal refusal = new Refusal(importReason(source.statusName(), source.diagnostic()));
+                // The importer could not read the file. Of a file that is there, that may be over a moment later.
+                throw UNREAD_STATUS.equals(source.statusName()) && Files.isRegularFile(file) ? refusal.heldFile() : refusal;
             }
             result.importMillis = (System.nanoTime() - start) / 1e6;
 
@@ -141,7 +236,7 @@ public final class ModelLoader {
             if (textureKeyOrNull != null) {
                 chosen = player.texture(textureKeyOrNull);
                 if (chosen == null) {
-                    throw new Refusal("the requested texture key is not among the " + keys.size() + " keys of the PLAYER target");
+                    throw new Refusal("the requested texture key is not among the " + keys.size() + " keys of the PLAYER target").ofTheTexture();
                 }
             } else {
                 // ModelManifestLookup.chooseTexture: the manifest default if it is a key, else the first key.
@@ -151,7 +246,7 @@ public final class ModelLoader {
                 }
             }
             if (chosen == null || chosen.uv == null) {
-                throw new Refusal("the PLAYER render target has no texture");
+                throw new Refusal("the PLAYER render target has no texture").ofTheTexture();
             }
             result.textureKey = chosen.name;
             result.hasPbr = chosen.hasPbr();
@@ -170,7 +265,7 @@ public final class ModelLoader {
 
             int imageIndex = findPayload(source, "BLOB_IMAGE", chosen.uv.blobId);
             if (imageIndex < 0) {
-                throw new Refusal("the texture blob is not among the import payloads");
+                throw new Refusal("the texture blob is not among the import payloads").ofTheTexture();
             }
             long decodeStart = System.nanoTime();
             try (Image image = Image.probe(source.payload(imageIndex))) {
@@ -178,11 +273,11 @@ public final class ModelLoader {
                 result.width = image.width();
                 result.height = image.height();
             } catch (java.io.UnsupportedEncodingException problem) {
-                throw new Refusal("texture: " + problem.getMessage());
+                throw new Refusal("texture: " + problem.getMessage()).ofTheTexture();
             }
             result.decodeMillis = (System.nanoTime() - decodeStart) / 1e6;
             if (result.width <= 0 || result.height <= 0 || (long) result.width * result.height * 4 > result.pixels.size()) {
-                throw new Refusal("texture: decoded size does not match " + result.width + "x" + result.height);
+                throw new Refusal("texture: decoded size does not match " + result.width + "x" + result.height).ofTheTexture();
             }
             complete = true;
             return result;
@@ -190,6 +285,58 @@ public final class ModelLoader {
             throw new Refusal("unreadable manifest or model data: " + problem.getMessage());
         } finally {
             source.close();
+            if (!complete) {
+                result.close();
+            }
+        }
+    }
+
+    /** A model folder: its player model and one texture, handed to the bake in the form an imported file has. */
+    private static Imported importFolder(Path folder, String textureKeyOrNull, Consumer<List<String>> textureKeys,
+                                         Consumer<List<ModelFolder.Opened>> opened, String realFolder) throws Refusal {
+        long start = System.nanoTime();
+        return adopt(ModelFolder.read(folder, textureKeyOrNull, textureKeys, opened, realFolder), start);
+    }
+
+    /** What the reader of a folder or of a raw model file has read, in the form an imported file has. */
+    private static Imported adopt(ModelFolder.Content content, long start) throws Refusal {
+        Imported result = new Imported();
+        boolean complete = false;
+        try {
+            result.forceCulling = content.forceCulling;
+            result.originVersion = ModelFolder.ORIGIN_VERSION;
+            result.heightScale = content.heightScale;
+            result.widthScale = content.widthScale;
+            result.textureKeys = content.textureKeys;
+            result.textureKey = content.textureKey;
+            result.hasPbr = content.hasPbr;
+            adoptGeo(result, ByteBuffer.wrap(content.geoModel), 0, content.geoModel.length);
+            result.importMillis = (System.nanoTime() - start) / 1e6;
+
+            long decodeStart = System.nanoTime();
+            try (NativeBuffer file = NativeBuffer.allocate(content.texture.length)) {
+                file.nio().put(0, content.texture);
+                try (Image image = Image.probe(file)) {
+                    // The reader of the folder has taken the file apart (PngGate); the decoder has to see the same picture.
+                    if (image.format() != Image.Format.PNG || image.width() != content.textureWidth || image.height() != content.textureHeight) {
+                        throw new Refusal("texture: the decoder reads another picture than the header of the file says").ofTheTexture();
+                    }
+                    result.pixels = image.decodeToBuffer();
+                    result.width = image.width();
+                    result.height = image.height();
+                }
+            } catch (java.io.UnsupportedEncodingException problem) {
+                throw new Refusal("texture: " + problem.getMessage()).ofTheTexture();
+            }
+            result.decodeMillis = (System.nanoTime() - decodeStart) / 1e6;
+            if (result.width <= 0 || result.height <= 0 || (long) result.width * result.height * 4 > result.pixels.size()) {
+                throw new Refusal("texture: decoded size does not match " + result.width + "x" + result.height).ofTheTexture();
+            }
+            complete = true;
+            return result;
+        } catch (Wire.WireException problem) {
+            throw new Refusal("unreadable model data: " + problem.getMessage());
+        } finally {
             if (!complete) {
                 result.close();
             }
@@ -219,7 +366,7 @@ public final class ModelLoader {
      * Bakes a geo model given as bytes (asset/model/data/geo_model.proto) with a white texture of 16x16 texels, the
      * way a model file is baked after its import. For tests and tools; the native library has to be loaded.
      */
-    public static ModelData bakeGeoModel(byte[] geoModel) throws Refusal {
+    static ModelData bakeGeoModel(byte[] geoModel) throws Refusal {
         long start = System.nanoTime();
         if (!NativeLoader.isLoaded()) {
             throw new Refusal("native library: not loaded");
@@ -373,16 +520,13 @@ public final class ModelLoader {
             long walkStart = System.nanoTime();
             ByteBuffer rgba = imported.pixels.nio().order(ByteOrder.LITTLE_ENDIAN);
             int texels = imported.width * imported.height;
-            byte[] alpha = new byte[texels];
-            for (int index = 0; index < texels; index++) {
-                alpha[index] = rgba.get(index * 4 + 3);
-            }
             if (keepPixels) {
                 ByteBuffer copy = ByteBuffer.allocateDirect(texels * 4).order(ByteOrder.LITTLE_ENDIAN);
                 copy.put(0, rgba, 0, texels * 4);
                 data.pixels = copy;
             }
-            walk(data, new AlphaPlane(alpha, imported.width, imported.height, originVersion));
+            // The alpha values are read where they lie: a copy of them would be a quarter of the texture again.
+            walk(data, new AlphaPlane(rgba, imported.width, imported.height, originVersion));
             data.walkMillis = (System.nanoTime() - walkStart) / 1e6;
 
             data.state = NativeModelState.create();
@@ -504,6 +648,7 @@ public final class ModelLoader {
             throw new Refusal("cube walk: quad counts do not add up");
         }
         data.meshes = meshes;
+        data.orderedBones = BoneMesh.markPartners(meshes);
         data.scheduledVerticesAtRest = walked;
     }
 
