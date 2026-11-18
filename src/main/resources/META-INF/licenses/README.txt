@@ -1,4 +1,4 @@
-ysm_ar 0.2.4: what is in this jar and under which terms
+ysm_ar 0.2.5: what is in this jar and under which terms
 
 ysmar/**
     The mod itself. Copyright 2026 Campione01. Apache License 2.0, see /LICENSE.

@@ -20,10 +20,10 @@ import java.util.Map;
  * Draws one mesh class of one bone, or one shading part of it. The Accelerated Rendering mesh is built on the first
  * draw per vertex layout and kept for the life of this object.
  *
- * The mesh does not depend on anything a resource reload changes, and it is built without reloadSensitive: such
- * meshes live in buffers Accelerated Rendering neither resets nor frees before the game closes, so the cached
- * objects stay valid across a reload. The plain collector is used on purpose: the culled one downloads the texture
- * once per location and keeps that copy until the next reload.
+ * The mesh does not depend on anything a resource reload changes, and the one-argument build makes it neither
+ * reloadSensitive (1.0.14) nor reloadAware (1.0.16): such meshes live in buffers Accelerated Rendering neither resets
+ * nor frees before the game closes, so the cached objects stay valid across a reload. The plain collector is used on
+ * purpose: the culled one downloads the texture once per location and keeps that copy until the next reload.
  *
  * A bone that shares a face with another bone (BoneMesh.partners) has a second mesh of the same vertices, from the
  * builder whose meshes come out in the order of the draw calls; which of the two a draw writes is said before the

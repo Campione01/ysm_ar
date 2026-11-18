@@ -103,7 +103,8 @@ public final class YsmArConfig {
             # renderer does, which shows such a bone inside out; reversed keeps their outer faces visible.
             mirrored_bones=as_baked
 
-            # true: work only with the Accelerated Rendering build this mod was written against (1.0.14-1.21.1-alpha).
+            # true: work only with the Accelerated Rendering builds this mod is verified with (1.0.14-1.21.1-alpha and
+            # 1.0.16-1.21.1-alpha); with any other build it changes nothing. false lifts that check.
             ar_version_check=true
 
             # How texture coordinates are rounded to texels when a model is baked: file applies the rules of the YSM

@@ -8,7 +8,7 @@ There is no Gradle project. `build.py` calls `javac --release 21` and `jar` dire
 - A JDK 21 or newer. The released jar was built with javac 21.0.11.
 - A Minecraft 1.21.1 installation with NeoForge 21.1.x: its `libraries` folder and the version manifest (JSON) of its NeoForge profile. The manifest has to list the libraries of the game; when a launcher keeps the vanilla libraries in a manifest of their own, give both files as a list.
 - The Minecraft and NeoForge classes in one jar with Mojang names. The ModDevGradle plugin of NeoForge writes such a jar to `build/moddev/artifacts/neoforge-<version>-merged.jar` of any mod project that is set up for that NeoForge version.
-- The jar of Accelerated Rendering 1.0.14 (`acceleratedrendering-1.0.14-1.21.1-alpha.jar`).
+- The jar of Accelerated Rendering 1.0.14 (`acceleratedrendering-1.0.14-1.21.1-alpha.jar`), the build the released jar was compiled against. Compiled against 1.0.16, the sources give the same class files.
 
 Yes Steve Model is not needed to build: the mod reaches it by reflection only. Only the Windows x64 natives are taken from the manifest, and the script has only been run on Windows.
 
@@ -16,7 +16,7 @@ Yes Steve Model is not needed to build: the mod reaches it by reflection only. O
 
 1. Copy `build.example.json` to `build.local.json` and enter your paths. A path is absolute or relative to this folder; forward slashes work on Windows. The entry `_about` only explains the others and may stay or go. `build.local.json` is ignored by git.
 2. Run `python build.py` (or `python build.py --quiet`).
-3. The mod is `out/ysm_ar-0.2.4.jar`.
+3. The mod is `out/ysm_ar-0.2.5.jar`.
 
 The script first checks that `src/main/resources/ysm_ar/native/ysm.dll` is the expected file (size and SHA-256). It then compiles the bindings under `src/main/java/com/elfmcys` against JOML, fastutil, LWJGL, the Log4j API and Netty alone, and after that the package `ysmar` against those classes and the game.
 
@@ -24,9 +24,9 @@ The script reads its inputs and writes only into `out/` and `work/` of this fold
 
 ## Reproducing The Released Jar
 
-`ysm_ar-0.2.4.jar` (5,147,525 bytes, SHA-256 `eaa7127fb7ef10c6d4b754f81f490aa0361ca44a2f07231bc9cc647c13cd8a7d`) was built from these sources with javac 21.0.11 against NeoForge 21.1.227 and Accelerated Rendering 1.0.14-1.21.1-alpha. With the same inputs `build.py` produces the same 248 files byte for byte, the manifest included; the jar file itself differs, because every entry carries the time it was written.
+`ysm_ar-0.2.5.jar` (5,147,757 bytes, SHA-256 `c5346277730fb44ed781f0ce40bd8611de20966ed1799be4494fc23f93e12156`) was built from these sources with javac 21.0.11 against NeoForge 21.1.227 and Accelerated Rendering 1.0.14-1.21.1-alpha. With the same inputs `build.py` produces the same 248 files byte for byte, the manifest included; the jar file itself differs, because every entry carries the time it was written.
 
-0.2.4 was checked in the game with a build that lacked one licence text. The released jar differs from that build in two entries, `META-INF/licenses/README.txt` and `META-INF/licenses/third-party/stx-cstringview`; the other 246 entries, among them all 200 classes and the native library, are the same bytes.
+The released jar is the file that was checked in the game. Against the released jar of 0.2.4 it differs in 7 of the 248 entries: the manifest, `META-INF/neoforge.mods.toml`, `META-INF/licenses/README.txt` and four classes (`YsmAr`, `YsmArConfig`, `YsmArSubmitter` and `client/ClientSetup`, the last by the version text alone); the native library is the same file.
 
 `.gitattributes` stores everything under `src/main` byte for byte. The bindings and the licence texts keep the line endings they came with, which is CRLF for most of them, and the released jar holds the licence texts in exactly that form.
 

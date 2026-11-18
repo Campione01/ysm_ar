@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.5
+
+- Works with Accelerated Rendering 1.0.16 (`1.0.16-1.21.1-alpha`) as well as 1.0.14. Up to 0.2.4 the mod changed nothing next to 1.0.16 and logged one warning. How models are read and drawn has not changed.
+- `ar_version_check=true` now means: work with the builds of Accelerated Rendering this version is verified with, 1.0.14 and 1.0.16. Next to any other build the mod changes nothing and logs one warning that names the installed version, as before; `ar_version_check=false` lifts the check, as before. A settings file of 0.2.4 keeps working and is not rewritten.
+- The README says that normal and specular maps of a model reach a shader pack on the take-over path, and what Yes Steve Model's own draw can show under a pack that applies parallax to entities.
+
 ## 0.2.4
 
 - Folder models are taken over: a model that lies below `config/yes_steve_model/custom` as a folder of plain files, with a manifest (`ysm.json`) or in the old layout (`main.json` with its textures next to it), is read directly and drawn like a packed `.ysm` file. New setting `takeover.folder_models` (default `true`).

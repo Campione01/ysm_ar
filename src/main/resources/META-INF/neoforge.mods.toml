@@ -4,7 +4,7 @@ license = "Apache-2.0"
 
 [[mods]]
 modId = "ysm_ar"
-version = "0.2.4"
+version = "0.2.5"
 displayName = "YSM AR"
 authors = "Campione01"
 credits = "Yes Steve Model project: the native library and its Java bindings (Apache-2.0), shipped here with their licence texts under META-INF/licenses; Argon4W, author of Accelerated Rendering"
@@ -13,7 +13,8 @@ Loads Yes Steve Model player models (.ysm files and model folders) with the open
 draws them through the compute path of Accelerated Rendering: one static mesh per bone, one bone matrix per frame.
 Next to Yes Steve Model 2.6.5 it takes over the body of the models that mod draws (players, Touhou Little Maid
 maids); Yes Steve Model keeps animating them and draws everything else.
-Client only, Windows x64. Without Accelerated Rendering 1.0.14 the mod changes nothing.
+Client only, Windows x64. Verified with Accelerated Rendering 1.0.14 and 1.0.16. Without Accelerated Rendering
+the mod changes nothing; with another build of it neither, unless ar_version_check=false.
 Settings: config/ysm_ar.properties. Commands: /ysm_ar status, /ysm_ar reload.
 '''
 

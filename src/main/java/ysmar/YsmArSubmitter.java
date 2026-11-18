@@ -9,13 +9,16 @@ import org.apache.logging.log4j.Logger;
 import ysmar.ar.ArBridge;
 import ysmar.core.NativeLoader;
 
+import java.util.List;
+
 /**
  * Hands a posed model to Accelerated Rendering. This class links without Accelerated Rendering; everything that
  * names its types is in ysmar.ar and is only touched after the mod list says it is installed.
  */
 public final class YsmArSubmitter {
     public static final String AR_MOD_ID = "acceleratedrendering";
-    public static final String AR_VERSION = "1.0.14-1.21.1-alpha";
+    /** The builds of Accelerated Rendering this mod is verified with. On any other it stays inert unless ar_version_check=false. */
+    public static final List<String> VERIFIED_AR_VERSIONS = List.of("1.0.14-1.21.1-alpha", "1.0.16-1.21.1-alpha");
 
     private static final Logger LOGGER = LogManager.getLogger("ysm_ar");
     private static final int UNKNOWN = 0;
@@ -133,7 +136,7 @@ public final class YsmArSubmitter {
         YsmArStats.reject(YsmArStats.Rejection.EXCEPTION);
     }
 
-    /** True while the mod is enabled and the installed Accelerated Rendering is the build this mod works with. */
+    /** True while the mod is enabled and the installed Accelerated Rendering is a verified build, or ar_version_check=false. */
     public static boolean usable() {
         return arUsable();
     }
@@ -227,9 +230,10 @@ public final class YsmArSubmitter {
                 LOGGER.info("ysm_ar: Accelerated Rendering is not installed, nothing is changed");
             } else {
                 String version = container.get().getModInfo().getVersion().toString();
-                if (config.arVersionCheck && !AR_VERSION.equals(version)) {
+                if (config.arVersionCheck && !VERIFIED_AR_VERSIONS.contains(version)) {
                     arState = UNUSABLE;
-                    arNote = "version " + version + " is installed, this mod was written against " + AR_VERSION + " (ar_version_check=false lifts the check)";
+                    arNote = "version " + version + " is installed, this mod is verified with " + String.join(" and ", VERIFIED_AR_VERSIONS)
+                            + " only (ar_version_check=false lifts the check)";
                     LOGGER.warn("ysm_ar: Accelerated Rendering {}, nothing is changed", arNote);
                 } else {
                     arState = USABLE;

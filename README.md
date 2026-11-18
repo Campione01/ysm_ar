@@ -19,8 +19,8 @@ Accelerated Rendering moves entity vertices on the GPU, and AR Velocity provides
 - Windows x64. The native library in the jar is built for that platform only; elsewhere the mod stays inert.
 - Minecraft 1.21.1, NeoForge 21.1.x, Java 21. Client only.
 - Yes Steve Model `2.6.5-neoforge+mc1.21.1`, exactly this build. Next to any other build the mod applies no mixin and takes nothing over.
-- Accelerated Rendering 1.0.14 (`1.0.14-1.21.1-alpha`) with its entity acceleration on. Models with partly transparent parts also need its option `force_translucent_acceleration` enabled.
-- For motion vectors: AR Velocity 0.1.4, the version this release was checked with, and what it needs: Iris 1.8.x, Super Resolution 0.9.2 with `enable_iris_extension = true` in the root of its config, and a shader pack that reads `at_velocity` behind the macros `SR_IRIS_EXT_ENABLED` / `SR_IRIS_EXT_VELOCITY`.
+- Accelerated Rendering 1.0.14 or 1.0.16 (`1.0.14-1.21.1-alpha`, `1.0.16-1.21.1-alpha`) with its entity acceleration on. Models with partly transparent parts also need its option `force_translucent_acceleration` enabled. Next to any other build of Accelerated Rendering the mod changes nothing, unless `ar_version_check=false`.
+- For motion vectors: AR Velocity 0.1.5, the version this release was checked with, and what it needs: Iris 1.8.x, Super Resolution 0.9.2 with `enable_iris_extension = true` in the root of its config, and a shader pack that reads `at_velocity` behind the macros `SR_IRIS_EXT_ENABLED` / `SR_IRIS_EXT_VELOCITY`.
 - Optional: Touhou Little Maid. Maids that use a Yes Steve Model model are taken over like players.
 
 Without Accelerated Rendering the mod changes nothing.
@@ -38,7 +38,7 @@ The built-in models of Yes Steve Model stay with Yes Steve Model, and so does ev
 ## Installation
 
 1. Install the mods listed above.
-2. Place `ysm_ar-0.2.4.jar` in the client's `mods` directory. SHA-256 of the released jar: `eaa7127fb7ef10c6d4b754f81f490aa0361ca44a2f07231bc9cc647c13cd8a7d`.
+2. Place `ysm_ar-0.2.5.jar` in the client's `mods` directory. SHA-256 of the released jar: `c5346277730fb44ed781f0ce40bd8611de20966ed1799be4494fc23f93e12156`.
 3. Start the game. `config/ysm_ar.properties` is written with the defaults on the first start. A settings file of an earlier version is kept as it is: settings it has no line for take their defaults, and a line `takeover.non_finite=refuse` in it stays in force.
 
 With the first model the native library is extracted to `<game>/ysm_ar/native/ysm-41b9bbca51ab.dll`, or to `%LOCALAPPDATA%\ysm_ar\native` when the path of the game directory has non-ASCII characters. The log then holds, among others, these lines:
@@ -73,7 +73,7 @@ The settings are in `config/ysm_ar.properties`, a UTF-8 text file:
 | `prewarm.ms_per_frame` | `2` | Milliseconds per frame for building the bone meshes of a model before its first draw; until all are built, Yes Steve Model draws the model. `0` builds everything in one frame. The meshes for the pieces of a stretched bone (`takeover.legacy_shading`) are built within the same time; until a bone has all of them it is drawn in one piece. |
 | `mesh_type` | `server` | How Accelerated Rendering keeps the bone meshes: `server` (uploaded once) or `client` (copied on every draw). With `takeover.face_order` on, bones that share a face go the `client` way while both are drawn. |
 | `mirrored_bones` | `as_baked` | Bones whose final transform mirrors: `as_baked` draws them as the official renderer does, `reversed` keeps their outer faces visible. |
-| `ar_version_check` | `true` | Work only with the Accelerated Rendering build the mod was written against. |
+| `ar_version_check` | `true` | Work only with the Accelerated Rendering builds the mod is verified with (1.0.14 and 1.0.16). Next to any other build the mod changes nothing and logs one warning; `false` lifts the check, and whether such a build then draws correctly is for you to look at. |
 | `bake.uv_rules` | `file` | How texture coordinates are rounded to texels: `file` applies the rules of the version the model file was exported with, which is what Yes Steve Model 2.6.5 shows; `official` applies the newest rules to every file. |
 | `stats.interval_seconds` | `0` | Above 0: one log line with counters every so many seconds. |
 | `takeover.debug_side_by_side` | `0` | For picture comparisons: not 0 moves the model drawn by this mod that many pixels to the right while Yes Steve Model keeps drawing its own. |
@@ -106,7 +106,7 @@ Measured on one machine in one scene, not a benchmark:
 - Under a shader pack that reads `at_velocity`, with DLSS at ratio 3.0, a walking model of 414 bones kept 0.875 of the detail of the same model standing with the take-over on, against 0.627 with it off.
 - In that scene the draw of this mod cost less CPU time per frame than Yes Steve Model's own draw of the body: 0.26 ms against 0.31 ms for one such model, drawn in two passes.
 
-The build these numbers were measured with differs from the released jar in two licence files only; its classes and its native library are the same bytes.
+These numbers were measured with version 0.2.4 on Accelerated Rendering 1.0.14. Version 0.2.5 changes nothing in how a model is drawn; the measurement was not repeated.
 
 ## Known Limitations
 
@@ -119,7 +119,8 @@ The build these numbers were measured with differs from the released jar in two 
 - Without a shader pack, `takeover.legacy_shading` costs draws: for one model of 414 bones in made-up poses in which 93 to 98 bones were stretched, the draw of this mod took about twice as long in an offline measurement. A model that would need more than 4096 pieces in one draw is drawn without that shading.
 - With `takeover.face_order` on, the vertices of bones that share a face are copied on every draw while both are drawn. Where such bones have partly transparent faces, their place among the translucent draws changes when the other bone appears or disappears; whether that shows was not looked at in the game.
 - Every texture of a model is a loaded copy of its own. While a model with a large texture (4096 x 4096) loads, memory use rises for a short time: about 640 MB of native memory and about 120 MB of Java heap were measured for one such load. The allocator of the native library keeps that memory and uses it again, so dropping a model gives little of it back.
-- Dropping an idle model frees this mod's copy only: Accelerated Rendering 1.0.14 keeps the meshes it was given.
+- Dropping an idle model frees this mod's copy only: Accelerated Rendering (1.0.14 and 1.0.16) keeps the meshes it was given.
+- Seen while testing, and not caused by this mod: in one test setup Accelerated Rendering 1.0.16 ended the second resource reload of a session (F3+T pressed twice) with `Buffer has been freed` in the log and returned the player to the title screen. This happened with this mod installed and without it.
 - At most 64 texture names of one model and 256 model objects of Yes Steve Model are kept at a time; what goes beyond while all of them are in use stays with Yes Steve Model.
 - The identity guards cannot tell two files apart that have the same bones, pivots, rotations and texture size and differ only in their geometry or pixels.
 - What Yes Steve Model draws itself is not repaired by this mod. With Accelerated Rendering installed, the native renderer of Yes Steve Model 2.6.5 was seen to hand a shader pack no quad centre (`mc_midTexCoord` is zero for every vertex). A pack that applies parallax to entities and takes that value on trust can then show a model with a normal map shattered: in the frames Yes Steve Model draws (after a model switch, while a model loads) and for every model that stays with it. Switching the pack's entity parallax off, or Yes Steve Model's compatibility renderer on, avoids it. Not checked without Accelerated Rendering.
@@ -143,11 +144,12 @@ YSM AR is licensed under the [Apache License 2.0](LICENSE).
 YSM AR（`ysm_ar`）是一个仅客户端的 NeoForge 1.21.1 模组，面向同时使用 Yes Steve Model 2.6.5 与 Accelerated Rendering 的玩家。它把 Yes Steve Model 所显示模型（玩家，以及使用这类模型的 Touhou Little Maid 女仆）的身体改由 Accelerated Rendering 在 GPU 上绘制：通常每根骨骼一个静态网格、每帧每根骨骼一个矩阵。动画、图层、手持物品、名牌等仍由 Yes Steve Model 负责。配合 AR Velocity，模型可以获得逐骨骼的运动矢量，减轻 DLSS、FSR、TAA 下的拖影。
 
 - 声明：这是非官方的社区模组，与 Yes Steve Model、Accelerated Rendering、Iris、Super Resolution 等项目无关，也未获得它们的认可；出现问题请不要向这些项目反馈。本模组不修改、不转换、不解包 Yes Steve Model，不绕过它的保护和任何检查，对它只通过反射使用公开（public）成员；模型文件由 Yes Steve Model 项目自己公开的开源原生库读取；文件夹模型由本模组按该项目开源代码的规则读取。
-- 需要：Windows x64、Minecraft 1.21.1、NeoForge 21.1.x、Java 21、Yes Steve Model `2.6.5-neoforge+mc1.21.1`（必须是这一版本）、Accelerated Rendering `1.0.14-1.21.1-alpha`；运动矢量还需要 AR Velocity 0.1.4（本版本是与它一起检查的）以及它所需的 Iris、Super Resolution 和读取 `at_velocity` 的光影包。
+- 需要：Windows x64、Minecraft 1.21.1、NeoForge 21.1.x、Java 21、Yes Steve Model `2.6.5-neoforge+mc1.21.1`（必须是这一版本）、Accelerated Rendering `1.0.14-1.21.1-alpha` 或 `1.0.16-1.21.1-alpha`（其他版本下本模组不做任何改动，并在日志中输出一条警告；`ar_version_check=false` 可以跳过这项检查）；运动矢量还需要 AR Velocity 0.1.5（本版本是与它一起检查的）以及它所需的 Iris、Super Resolution 和读取 `at_velocity` 的光影包。
 - 接管范围：`config/yes_steve_model/custom` 下你自己的模型，共三种——打包的 `.ysm` 文件；原始模型文件（以 `YSGP` 开头、版本为 1 或 2 的 `.ysm` 文件，也就是模型文件夹的归档）；文件夹模型（带清单 `ysm.json` 的布局，或 `main.json` 与贴图放在一起的旧布局）。Yes Steve Model 的内置模型仍由它自己绘制，与内置模型或内置模型包同名的自定义文件夹也是如此。
-- 安装：把 `ysm_ar-0.2.4.jar` 放进客户端的 `mods` 文件夹。发布文件的 SHA-256：`eaa7127fb7ef10c6d4b754f81f490aa0361ca44a2f07231bc9cc647c13cd8a7d`。设置文件是 `config/ysm_ar.properties`，命令是 `/ysm_ar status` 和 `/ysm_ar reload`。旧版本留下的设置文件会原样保留：其中没有的设置取默认值，已有的 `takeover.non_finite=refuse` 继续有效。
+- 安装：把 `ysm_ar-0.2.5.jar` 放进客户端的 `mods` 文件夹。发布文件的 SHA-256：`c5346277730fb44ed781f0ce40bd8611de20966ed1799be4494fc23f93e12156`。设置文件是 `config/ysm_ar.properties`，命令是 `/ysm_ar status` 和 `/ysm_ar reload`。旧版本留下的设置文件会原样保留：其中没有的设置取默认值，已有的 `takeover.non_finite=refuse` 继续有效。
+- 0.2.5 的变化：支持 Accelerated Rendering 1.0.16；模型的读取和绘制方式没有变化，0.2.4 留下的设置文件可以继续使用。测试中还见到一个与本模组无关的现象：在一个测试环境里，Accelerated Rendering 1.0.16 在同一次游戏中第二次重新加载资源（按两次 F3+T）时，日志出现 `Buffer has been freed` 并把玩家退回标题画面；装不装本模组都会发生。
 - 0.2.4 新增的设置：`takeover.folder_models`（默认 `true`，接管文件夹模型；不包括原始模型文件）、`takeover.legacy_shading`（默认 `true`，不使用光影包时，被动画沿各轴按不同比例缩放的骨骼按 Yes Steve Model 2.6.5 的方式着色，这样的骨骼会分成几块绘制）、`takeover.face_order`（默认 `true`，两根骨骼有完全重合的面时显示后一根骨骼的面，与 Yes Steve Model 一致）、`models.idle_seconds`（默认 `1800`，模型在这么多秒内没有被任何实体显示就从内存中释放，再次显示时重新读取；`0` 表示不释放）。`takeover.non_finite` 的默认值由 `refuse` 改为 `prune`：骨骼的数值不是有限数时，略去这根骨骼及其下级骨骼。全部设置见上方的英文表格。
-- 实测结果（一台机器、一个场景，不是基准测试）：在读取 `at_velocity` 的光影包下，DLSS 比例为 3.0 时，一个 414 根骨骼的模型在行走时保留了同一模型站立时细节的 0.875（开启接管），关闭接管时为 0.627；本模组绘制身体所用的 CPU 时间少于 Yes Steve Model 自己的绘制（一个这样的模型、两个渲染通道，每帧 0.26 毫秒对 0.31 毫秒）。测量所用的文件与发布文件只差两个许可证文件，类文件和原生库完全相同。
+- 实测结果（一台机器、一个场景，不是基准测试）：在读取 `at_velocity` 的光影包下，DLSS 比例为 3.0 时，一个 414 根骨骼的模型在行走时保留了同一模型站立时细节的 0.875（开启接管），关闭接管时为 0.627；本模组绘制身体所用的 CPU 时间少于 Yes Steve Model 自己的绘制（一个这样的模型、两个渲染通道，每帧 0.26 毫秒对 0.31 毫秒）。这些数字是用 0.2.4 在 Accelerated Rendering 1.0.14 上测得的；0.2.5 没有改动绘制方式，未重新测量。
 - 已知限制（完整列表见上方 Known Limitations）：只支持上面写明的这一版 Yes Steve Model；文件夹模型或原始模型文件里有未经比对的内容时仍由 Yes Steve Model 绘制，`/ysm_ar status` 会写明原因；外观发光的实体、贴图被其他模组替换的玩家、世界之外的渲染（物品栏、界面、预览）不接管；切换模型或贴图后的最初几帧由 Yes Steve Model 绘制；读取带 4096 x 4096 贴图的模型时内存占用会短时间升高；PBR 模型的法线贴图和高光贴图在接管时同样会交给光影包（已在游戏内确认，画面与 Yes Steve Model 的兼容渲染一致）。
 - Yes Steve Model 自己绘制的画面本模组无法修正：安装了 Accelerated Rendering 时，Yes Steve Model 2.6.5 的原生渲染不向光影包提供面的贴图中心坐标（每个顶点的 `mc_midTexCoord` 都是 0）；对实体做视差、又直接采用这个值的光影包，可能把带法线贴图的模型画得支离破碎（切换模型后的最初几帧、模型加载期间，以及所有仍由 Yes Steve Model 绘制的模型）。关闭光影包的实体视差，或开启 Yes Steve Model 的兼容渲染可以避免。未在不安装 Accelerated Rendering 的情况下检查。
 - 测试中见到、就目前所知并非本模组引起的问题：与 Touhou Little Maid 1.5.3 一起使用时，在女仆的模型界面切换模型，Yes Steve Model 2.6.5 有时会抛出 `ConcurrentModificationException`（出自它的 `setYsmModel`）使游戏崩溃。安装和未安装本模组时都出现过；本模组是否会让它更容易出现尚不清楚。

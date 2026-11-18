@@ -104,8 +104,8 @@ public final class ArBridge {
 
     /**
      * True when Accelerated Rendering hands out the mesh it already has for vertices it is given a second time (its
-     * setting mesh_merge_type). Its mesh buffers never shrink: without that, a model that is read again would add
-     * all its meshes to them once more.
+     * setting mesh_merge_type; 1.0.14 forgets them at each resource reload, 1.0.16 only the reload-aware ones). Its
+     * mesh buffers never shrink: without that, a model that is read again would add all its meshes to them once more.
      */
     public static boolean mergesMeshes() {
         return CoreFeature.getMeshMergeType() == MeshDataCacheType.MERGED;
